@@ -1,0 +1,3 @@
+[submodule "vendor/single-file-cli"]
+	path = vendor/single-file-cli
+	url = https://github.com/gildas-lormeau/single-file-cli.git

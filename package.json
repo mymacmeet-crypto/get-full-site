@@ -1,0 +1,34 @@
+{
+  "name": "web-archiver",
+  "version": "1.0.0",
+  "description": "Crawl a domain and archive every selected page as a standalone HTML file, driving SingleFile in-process",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "src/crawler.js",
+  "bin": {
+    "web-archiver": "bin/archive.js"
+  },
+  "engines": {
+    "node": ">=22.4.0"
+  },
+  "scripts": {
+    "start": "node bin/archive.js",
+    "archive": "pwsh -NoProfile -ExecutionPolicy Bypass -File runner.ps1",
+    "archive:sh": "bash runner.sh",
+    "test": "node --test \"test/**/*.test.js\"",
+    "setup": "git submodule update --init --recursive && npm --prefix vendor/single-file-cli install"
+  },
+  "keywords": [
+    "crawler",
+    "archiver",
+    "singlefile",
+    "website-mirror",
+    "offline"
+  ],
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "robots-parser": "^3.0.1"
+  }
+}
