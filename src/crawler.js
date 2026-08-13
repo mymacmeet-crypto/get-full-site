@@ -450,6 +450,9 @@ class Crawler {
   }
 
   _persistState() {
+    // A dry run archives nothing, so saving would advance a real crawl's
+    // resume point past pages it never took. Every write goes through here.
+    if (this.config.dryRun) return;
     try {
       this.state.save({
         startUrl: this.startUrl,
@@ -472,13 +475,19 @@ class Crawler {
     const unfinished = this.aborted || this.queue.pendingCount > 0;
     if (unfinished) {
       this._persistState();
-      logger.info(
-        this.aborted
-          ? 'State saved - rerun with --resume to continue this crawl.'
-          : `Reached --max-pages with ${this.queue.pendingCount} URL(s) pending - ` +
+      if (this.config.dryRun) {
+        logger.info('Dry run - any saved crawl state was left untouched.');
+      } else if (this.aborted) {
+        logger.info('State saved - rerun with --resume to continue this crawl.');
+      } else {
+        logger.info(
+          `Reached --max-pages with ${this.queue.pendingCount} URL(s) pending - ` +
             'rerun with --resume and a higher --max-pages to continue.'
-      );
-    } else {
+        );
+      }
+    } else if (!this.config.dryRun) {
+      // Clearing here on a dry run would delete a real crawl's resume point,
+      // which is worse than a stale save: the pending queue is unrecoverable.
       this.state.clear();
     }
 
