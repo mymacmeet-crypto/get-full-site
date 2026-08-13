@@ -16,7 +16,7 @@
     "archive": "pwsh -NoProfile -ExecutionPolicy Bypass -File runner.ps1",
     "archive:sh": "bash runner.sh",
     "test": "node --test \"test/**/*.test.js\"",
-    "setup": "git submodule update --init --recursive && npm --prefix vendor/single-file-cli install"
+    "setup": "git submodule update --init --recursive"
   },
   "keywords": [
     "crawler",

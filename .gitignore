@@ -1,4 +1,6 @@
-node_modules/
-archive/
+# Rooted so it only hides the npm-managed tree at the repo root - the vendored
+# submodule under vendor/node_modules/ is checked in on purpose.
+/node_modules/
+/archive/
 .env
 *.log

@@ -56,11 +56,31 @@ of its URL appended. Nothing is ever lost to a name clash.
 ```bash
 git clone --recursive <this repo>
 cd web-archiver
-npm install
-npm run setup      # fetches the SingleFile submodule and its one dependency
+npm install        # this project's 4 dependencies
+npm run setup      # checks out the vendored submodules
 ```
 
 Already cloned without `--recursive`? `npm run setup` fixes it.
+
+### What is vendored, and why it sits where it does
+
+```
+vendor/
+  single-file-cli/            SingleFile, AGPL-3.0
+  node_modules/simple-cdp/    its CDP driver, MIT
+```
+
+Neither is an npm dependency of this project — both are pinned git submodules,
+so `npm run setup` no longer installs anything from the registry.
+
+The `node_modules/` path is deliberate, not a stray install. SingleFile's
+`lib/cdp-client.js` imports `simple-cdp` as a *bare specifier*, and Node
+resolves those only by walking parent directories looking for `node_modules`.
+Walking up from `vendor/single-file-cli/lib/` reaches `vendor/node_modules/`,
+so the vendored checkout is found with no patching of SingleFile's source —
+which matters, because any patch there would be wiped by the next submodule
+update. The repo-root `node_modules/` is still npm's and still ignored; only
+this one is checked in.
 
 ## Usage
 
@@ -240,6 +260,10 @@ One bad page never stops a crawl: it is recorded and the wave moves on.
 This project is MIT. SingleFile is **AGPL-3.0** and is *not* copied into this
 repository — it is a git submodule, so its code stays in its own project and
 history. If you vendor it in here instead, the combined work becomes AGPL.
+
+`simple-cdp` is **MIT** (© Gildas Lormeau), pinned at `v1.10.0`. Submoduling it
+carries no copyleft; it is kept out of the tree for the same reason as
+SingleFile — its code stays in its own history rather than being copied in.
 
 ## Tests
 

@@ -1,3 +1,6 @@
 [submodule "vendor/single-file-cli"]
 	path = vendor/single-file-cli
 	url = https://github.com/gildas-lormeau/single-file-cli.git
+[submodule "vendor/node_modules/simple-cdp"]
+	path = vendor/node_modules/simple-cdp
+	url = https://github.com/gildas-lormeau/simple-cdp.git
