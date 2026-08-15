@@ -43,7 +43,7 @@ function createProgram() {
     .option('-t, --timeout <ms>', 'per-request / per-page timeout', '30000')
     .option(
       '--deferred-images-idle <ms>',
-      'how long the browser waits for lazy-loaded images per page (SingleFile default is 1500)'
+      'how long the browser waits for lazy-loaded images per page (engine default is 1500)'
     )
     .option('--no-follow-redirects', 'do not follow HTTP redirects')
     .option('--overwrite', 'overwrite files that already exist in raw-html/')

@@ -17,8 +17,8 @@ jobs:
         node: ['22.x', '24.x']
 
     steps:
-      # No submodules on purpose: the tests make no network calls and launch no
-      # browser, so SingleFile and its CDP driver are not needed to run them.
+      # The capture engine is vendored in the repo, so a plain checkout has
+      # everything; the tests make no network calls and launch no browser.
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4

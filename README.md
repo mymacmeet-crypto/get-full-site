@@ -5,9 +5,10 @@ standalone HTML files — each page a single file with its CSS, images and fonts
 inlined, so it opens offline with nothing missing.
 
 It merges two halves that used to be separate projects: a crawler that decides
-*which* pages to take, and [SingleFile](https://github.com/gildas-lormeau/single-file-cli)
-that produces the archive. SingleFile runs **in-process**, so one browser serves
-the whole crawl instead of one browser per page.
+*which* pages to take, and a capture engine that produces the archive
+([SingleFile](https://github.com/gildas-lormeau/single-file-cli), vendored under
+`vendor/capture-engine`). It runs **in-process**, so one browser serves the
+whole crawl instead of one browser per page.
 
 ## Output layout
 
@@ -19,7 +20,7 @@ archive/
     report/
       crawl-report.json      every page, skip reason and failure
       sitemap.xml            archived URL -> which flat file holds it
-      singlefile-errors.log  browser-side failures, when any
+      capture-errors.log     browser-side failures, when any
       sitemaps/              copies of the site's own sitemap.xml
       .crawl-state.json      resume state (removed on a clean finish)
     raw-html/
@@ -46,41 +47,44 @@ of its URL appended. Nothing is ever lost to a name clash.
 
 ## Requirements
 
-- **Node.js ≥ 22.4.0** — SingleFile needs the runtime's native `WebSocket`
-- **Chrome, Chromium or Edge** installed. SingleFile drives a real browser over
+- **Node.js ≥ 22.4.0** — the capture engine needs the runtime's native `WebSocket`
+- **Chrome, Chromium or Edge** installed. The engine drives a real browser over
   the DevTools Protocol, so a browser is required and cannot be vendored away.
   Set `BROWSER_EXECUTABLE_PATH` if auto-detection misses yours.
 
 ## Setup
 
 ```bash
-git clone --recursive <this repo>
+git clone <this repo>
 cd web-archiver
 npm install        # this project's 4 dependencies
-npm run setup      # checks out the vendored submodules
 ```
 
-Already cloned without `--recursive`? `npm run setup` fixes it.
+That is the whole setup. No submodules, no `npm run setup`, nothing fetched for
+the browser engine — it is checked into this repository.
 
-### What is vendored, and why it sits where it does
+### What is vendored
 
 ```
 vendor/
-  single-file-cli/            SingleFile, AGPL-3.0
-  node_modules/simple-cdp/    its CDP driver, MIT
+  capture-engine/    the page-capture engine, AGPL-3.0
+  simple-cdp/        its Chrome DevTools Protocol driver, MIT
 ```
 
-Neither is an npm dependency of this project — both are pinned git submodules,
-so `npm run setup` no longer installs anything from the registry.
+Both are plain source. Neither contains a `package.json` or a `node_modules`
+directory, and neither is an npm dependency.
 
-The `node_modules/` path is deliberate, not a stray install. SingleFile's
-`lib/cdp-client.js` imports `simple-cdp` as a *bare specifier*, and Node
-resolves those only by walking parent directories looking for `node_modules`.
-Walking up from `vendor/single-file-cli/lib/` reaches `vendor/node_modules/`,
-so the vendored checkout is found with no patching of SingleFile's source —
-which matters, because any patch there would be wiped by the next submodule
-update. The repo-root `node_modules/` is still npm's and still ignored; only
-this one is checked in.
+Dropping `package.json` has one consequence worth knowing. Both packages are
+ESM, and they declared that through `"type": "module"` in the manifest we
+removed. Without it Node resolves `.js` against the nearest package.json going
+up — which is this project's, and it says `commonjs`. So every vendored `.js`
+was renamed to `.mjs`, and the relative imports were rewritten to match; the
+extension now carries the module type. The engine's one bare `simple-cdp`
+import became a relative path to `../../simple-cdp/mod.mjs`, since a bare
+specifier would need the `node_modules` lookup this layout no longer has.
+
+Those changes are listed in full in `vendor/capture-engine/NOTICE`, as the AGPL
+requires of a modified version. No other source line was altered.
 
 ## Usage
 
@@ -118,8 +122,8 @@ command:
 > looks like an instant crash. Double-clicking `runner.cmd` in Explorer works
 > too and keeps the window open when the crawl finishes.
 
-It checks the environment first (Node version, `npm install`, the SingleFile
-submodule — and offers to fix what is missing), then opens with two choices:
+It checks the environment first (Node version, `npm install`, the vendored
+engine — and offers to fix what is missing), then opens with two choices:
 
 ```
 Start
@@ -203,7 +207,7 @@ The crawl runs in **waves** rather than page by page:
 ```
 take a batch from the frontier
   -> discovery: plain HTTP GET per page (status, links, canonical, robots)
-  -> archive:   the whole batch in ONE SingleFile call, parallel tabs
+  -> archive:   the whole batch in ONE engine call, parallel tabs
   -> repeat
 ```
 
@@ -227,12 +231,12 @@ each one owns its browser. Both problems disappear at once.
 
 ### The lazy-image default
 
-SingleFile waits 1500ms per page for lazy-loaded images. Measured on one
+The engine waits 1500ms per page for lazy-loaded images. Measured on one
 Wikipedia article:
 
 | Setting | Time | Output | Inlined images |
 |---|---|---|---|
-| `1500` (SingleFile default) | 9.3s | 774,913 B | 24 |
+| `1500` (engine default) | 9.3s | 774,913 B | 24 |
 | **`500` (this project's default)** | **6.7s** | 774,898 B | 24 |
 | `0` (`--deferred-images-idle 0`) | 5.2s | 756,811 B | 24 |
 
@@ -246,7 +250,7 @@ with identical output. The time goes into the capture, not the waiting.
 
 ## Failure handling
 
-SingleFile **exits 0 even when it fails** — an unreachable host or a 404 both
+The engine **exits 0 even when it fails** — an unreachable host or a 404 both
 report success, and a 404 error page gets archived as if it were the real thing.
 So a page counts as archived only when its file actually exists and is non-empty.
 Browser-side failures are recovered from `singlefile-errors.log` and attached to
@@ -257,13 +261,30 @@ One bad page never stops a crawl: it is recorded and the wave moves on.
 
 ## Licensing
 
-This project is MIT. SingleFile is **AGPL-3.0** and is *not* copied into this
-repository — it is a git submodule, so its code stays in its own project and
-history. If you vendor it in here instead, the combined work becomes AGPL.
+This project is **AGPL-3.0-or-later**, and that is a consequence of vendoring
+rather than a preference. `vendor/capture-engine` is
+[SingleFile](https://github.com/gildas-lormeau/single-file-cli) by Gildas
+Lormeau, licensed AGPL-3.0. Including its source here rather than depending on
+it means the AGPL covers the combined work, so the whole repository is AGPL.
 
-`simple-cdp` is **MIT** (© Gildas Lormeau), pinned at `v1.10.0`. Submoduling it
-carries no copyleft; it is kept out of the tree for the same reason as
-SingleFile — its code stays in its own history rather than being copied in.
+Two things follow that are easy to miss:
+
+- **The network clause.** If you run a modified version of this on a server that
+  users reach over a network, those users are entitled to its source. The plain
+  GPL does not do this; the AGPL does.
+- **Renaming the directory changes nothing about authorship.** `capture-engine`
+  is SingleFile. Its `LICENSE` and the AGPL headers in its sources are intact,
+  and `vendor/capture-engine/NOTICE` records the version it came from and every
+  modification made to it.
+
+`vendor/simple-cdp` is **MIT** (© 2024 Gildas Lormeau) and imposes no copyleft
+of its own; its `LICENSE.txt` is kept alongside it.
+
+`NOTICE` at the repository root summarises all of this.
+
+If you would rather this project were MIT, the way back is to stop shipping the
+engine's source: put it behind a submodule or an npm dependency again, so its
+code stays in its own project rather than this one.
 
 ## Tests
 

@@ -1,0 +1,35 @@
+This directory contains a MODIFIED copy of SingleFile CLI.
+
+  Upstream project : SingleFile CLI (single-file-cli)
+  Upstream author  : Gildas Lormeau
+  Upstream source  : https://github.com/gildas-lormeau/single-file-cli
+  Upstream version : 2.0.83 (commit c153d9613d50cabd5ba356c79d2b28b12b887236)
+  Licence          : GNU Affero General Public License v3.0 - see LICENSE
+
+SingleFile is the work of Gildas Lormeau and contributors. It is redistributed
+here under the AGPL-3.0, which is why this repository as a whole is AGPL-3.0
+rather than MIT. The directory was renamed for use inside this project; that
+rename does not change the authorship of anything in it.
+
+Section 5(a) of the AGPL requires a modified version to carry prominent notices
+stating that it was changed. The changes made to the upstream sources are:
+
+  1. Every `.js` source file was renamed to `.mjs`, and every relative import
+     was updated to match. SingleFile is ESM and declared that through
+     `"type": "module"` in its package.json; this copy has no package.json, so
+     the extension has to carry the module type instead.
+
+  2. `lib/cdp-client.mjs` had its bare `simple-cdp` import rewritten to the
+     relative path `../../simple-cdp/mod.mjs`. The bare specifier required a
+     `node_modules` lookup, which this project no longer has.
+
+  3. `single-file-cli-api.js` was renamed to `capture-api.mjs`, and the
+     reference to it in `single-file-launcher.mjs` was updated.
+
+  4. Files not needed to run the capture engine in-process were not copied:
+     package.json, package-lock.json, deno.json, deno.lock, eslint.config.mjs,
+     Dockerfile, the build/compile shell scripts, the CLI shell and batch
+     wrappers, the .github workflow, and resources/single-file.ico.
+
+No other source line was altered. Diffing this directory against upstream
+v2.0.83 after undoing the renames above will show no functional change.

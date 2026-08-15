@@ -166,23 +166,17 @@ preflight() {
   fi
   ok "dependencies installed"
 
-  # SingleFile lives in a submodule (AGPL, kept out of this repo's history).
-  local sf_dir="${SINGLEFILE_DIR:-}"
-  [[ -z $sf_dir ]] && sf_dir=$(env_file_value SINGLEFILE_DIR)
-  [[ -z $sf_dir ]] && sf_dir="vendor/single-file-cli"
+  # The capture engine is vendored into this repository - nothing to install.
+  local engine_dir="${CAPTURE_ENGINE_DIR:-}"
+  [[ -z $engine_dir ]] && engine_dir=$(env_file_value CAPTURE_ENGINE_DIR)
+  [[ -z $engine_dir ]] && engine_dir="vendor/capture-engine"
 
-  if [[ -d $sf_dir/node_modules ]]; then
-    ok "SingleFile ready (${sf_dir})"
+  if [[ -f $engine_dir/capture-api.mjs ]]; then
+    ok "capture engine ready (${engine_dir})"
   else
-    warn "SingleFile is not set up at ${sf_dir}"
-    local answer
-    ask_yn answer "run npm run setup now?" y
-    if [[ $answer == yes ]]; then
-      npm run setup || die "npm run setup failed."
-      ok "SingleFile ready"
-    else
-      note "archiving will fail without it; --dry-run still works"
-    fi
+    bad "capture engine missing at ${engine_dir}"
+    note "it ships in vendor/capture-engine; restore it or set CAPTURE_ENGINE_DIR"
+    note "a dry run still works without it"
   fi
 }
 

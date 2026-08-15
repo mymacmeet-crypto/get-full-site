@@ -1,8 +1,8 @@
 {
   "name": "web-archiver",
   "version": "1.0.0",
-  "description": "Crawl a domain and archive every selected page as a standalone HTML file, driving SingleFile in-process",
-  "license": "MIT",
+  "description": "Crawl a domain and archive every selected page as a standalone HTML file, driving a vendored capture engine in-process",
+  "license": "AGPL-3.0-or-later",
   "type": "commonjs",
   "main": "src/crawler.js",
   "bin": {
@@ -15,8 +15,7 @@
     "start": "node bin/archive.js",
     "archive": "pwsh -NoProfile -ExecutionPolicy Bypass -File runner.ps1",
     "archive:sh": "bash runner.sh",
-    "test": "node --test \"test/**/*.test.js\"",
-    "setup": "git submodule update --init --recursive"
+    "test": "node --test \"test/**/*.test.js\""
   },
   "keywords": [
     "crawler",

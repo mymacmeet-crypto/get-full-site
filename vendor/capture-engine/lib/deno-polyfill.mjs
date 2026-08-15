@@ -1,0 +1,255 @@
+/*
+ * Copyright 2010-2024 Gildas Lormeau
+ * contact : gildas.lormeau <at> gmail.com
+ *
+ * This file is part of SingleFile.
+ *
+ *   The code in this file is free software: you can redistribute it and/or
+ *   modify it under the terms of the GNU Affero General Public License
+ *   (GNU AGPL) as published by the Free Software Foundation, either version 3
+ *   of the License, or (at your option) any later version.
+ *
+ *   The code in this file is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero
+ *   General Public License for more details.
+ *
+ *   As additional permission under GNU AGPL version 3 section 7, you may
+ *   distribute UNMODIFIED VERSIONS OF THIS file without the copy of the GNU
+ *   AGPL normally required by section 4, provided you include this license
+ *   notice and a URL through which recipients can access the Corresponding
+ *   Source.
+ */
+
+// deno-lint-ignore-file no-node-globals
+
+/* global Deno, process */
+
+import * as path from "path";
+
+const DENO_RUNTIME_DETECTED = typeof Deno !== "undefined";
+
+const NODE_MODULES = {
+	"fs": "node:fs/promises",
+	"os": "node:os",
+	"child_process": "node:child_process",
+	"url": "node:url",
+	"process": "node:process"
+};
+
+const args = DENO_RUNTIME_DETECTED ? Deno.args : process.argv.slice(2);
+
+const stdout = {
+	write: DENO_RUNTIME_DETECTED ? data => Deno.stdout.write(data) : data => process.stdout.write(data)
+};
+
+const build = {
+	os: DENO_RUNTIME_DETECTED ? Deno.build.os : process.platform == "win32" ? "windows" : process.platform
+};
+
+const errors = {
+	NotFound: DENO_RUNTIME_DETECTED ? Deno.errors.NotFound : class NotFound extends Error {
+		constructor(message) {
+			super(message);
+			this.name = "NotFound";
+		}
+	}
+};
+
+const Command = DENO_RUNTIME_DETECTED ? Deno.Command : class Command {
+	constructor(path, options = {}) {
+		this.path = path;
+		this.options = options;
+	}
+	async spawn() {
+		const childProcess = await import(NODE_MODULES["child_process"]);
+		const child = childProcess.spawn(this.path, this.options.args);
+
+		await new Promise((resolve, reject) => {
+			child.on("spawn", () => resolve());
+			child.on("error", error => {
+				if (error.code == "ENOENT") {
+					reject(new errors.NotFound(error.message));
+				} else {
+					reject(error);
+				}
+			});
+		});
+		return {
+			status: new Promise((resolve, reject) => {
+				child.on("exit", code => {
+					if (code === 0 || code === 143 || code === 130 || code === null) {
+						resolve();
+					} else {
+						reject(new Error(`Process exited with code ${code}`));
+					}
+				});
+			}),
+			kill() {
+				child.kill();
+			},
+			ref() {
+				// Do nothing
+			}
+		};
+	}
+};
+
+const DenoAPI = {
+	args,
+	readFile,
+	readTextFile,
+	writeTextFile,
+	writeFile,
+	mkdir,
+	makeTempDir,
+	stat,
+	remove,
+	stdout,
+	exit,
+	addSignalListener,
+	build,
+	errors,
+	Command,
+	cwd
+};
+
+const pathAPI = {
+	dirname,
+	toFileUrl,
+	SEPARATOR: DENO_RUNTIME_DETECTED ? path.SEPARATOR : path.sep
+};
+
+const isDeno = DENO_RUNTIME_DETECTED;
+
+// the connection to the browser relies on the WebSocket of the runtime, which
+// Node.js provides since 22.4.0 and can still be turned off with
+// --no-experimental-websocket
+if (typeof globalThis.WebSocket !== "function") {
+	throw new Error("WebSocket is not available, Node.js 22.4.0 or later is required");
+}
+
+export { DenoAPI as Deno, pathAPI as path, isDeno };
+
+async function readFile(path) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.readFile(path);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		return new Uint8Array(await fsPromise.readFile(path));
+	}
+}
+
+async function readTextFile(path) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.readTextFile(path);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		return fsPromise.readFile(path, {
+			encoding: "utf8"
+		});
+	}
+}
+
+async function writeTextFile(path, data, options = {}) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.writeTextFile(path, data, options);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		options.encoding = "utf8";
+		if (options.append) {
+			return fsPromise.appendFile(path, data, options);
+		} else {
+			return fsPromise.writeFile(path, data, options);
+		}
+	}
+}
+
+async function writeFile(path, data, options = {}) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.writeFile(path, data, options);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		return fsPromise.writeFile(path, data, options);
+	}
+}
+
+async function mkdir(path, options = {}) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.mkdir(path, options);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		return fsPromise.mkdir(path, options);
+	}
+}
+
+async function makeTempDir() {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.makeTempDir();
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		const os = await import(NODE_MODULES["os"]);
+		return fsPromise.mkdtemp(path.join(os.tmpdir(), "/"));
+	}
+}
+
+async function stat(path) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.stat(path);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		return fsPromise.stat(path);
+	}
+}
+
+async function remove(path, options = {}) {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.remove(path, options);
+	} else {
+		const fsPromise = await import(NODE_MODULES["fs"]);
+		return fsPromise.rm(path, options);
+	}
+}
+
+function exit(code) {
+	if (DENO_RUNTIME_DETECTED) {
+		Deno.exit(code);
+	} else {
+		if (code == "SIGINT") {
+			code = 130;
+		} else if (code == "SIGTERM") {
+			code = 143;
+		}
+		process.exit(code);
+	}
+}
+
+function addSignalListener(signal, listener) {
+	if (DENO_RUNTIME_DETECTED) {
+		Deno.addSignalListener(signal, listener);
+	} else {
+		process.once(signal, listener);
+	}
+}
+
+async function cwd() {
+	if (DENO_RUNTIME_DETECTED) {
+		return Deno.cwd();
+	} else {
+		const process = await import(NODE_MODULES["process"]);
+		return process.cwd();
+	}
+}
+
+function dirname(filePath) {
+	return path.dirname(filePath);
+}
+
+async function toFileUrl(filePath) {
+	if (DENO_RUNTIME_DETECTED) {
+		return path.toFileUrl(filePath);
+	} else {
+		const url = await import(NODE_MODULES["url"]);
+		return url.pathToFileURL(filePath).href;
+	}
+}

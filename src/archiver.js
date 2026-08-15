@@ -5,31 +5,31 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
 /**
- * Drives SingleFile in-process instead of spawning its CLI per page.
+ * Drives the vendored capture engine in-process instead of spawning a CLI per page.
  *
  * One browser is launched for the whole crawl and every batch of pages is
  * captured through it, in parallel tabs. Measured against spawning the CLI once
  * per page, that took a 4-page run from ~9.0s/page to ~2.3s/page: the per-page
  * process + Chrome launch (~1.4s) disappears and pages overlap.
  *
- * SingleFile is ESM with no top-level await outside its CLI entry point, so a
- * dynamic import() reaches its API from this CommonJS codebase.
+ * The engine is ESM with no top-level await outside its CLI entry point, so a
+ * dynamic import() reaches its API from this CommonJS codebase. Its sources are
+ * vendored under vendor/capture-engine as .mjs - see that directory's NOTICE.
  */
 
-const API_FILE = 'single-file-cli-api.js';
+const API_FILE = 'capture-api.mjs';
 
-/** Candidate SingleFile checkouts, most explicit first. */
+/** Candidate engine directories, most explicit first. */
 function candidateDirs(explicitDir) {
   const dirs = [];
   if (explicitDir) dirs.push(explicitDir);
-  dirs.push(path.resolve(__dirname, '..', 'vendor', 'single-file-cli'));
-  dirs.push(path.resolve(__dirname, '..', '..', 'single-file-cli'));
+  dirs.push(path.resolve(__dirname, '..', 'vendor', 'capture-engine'));
   return dirs;
 }
 
 /**
- * Locate the SingleFile API module.
- * Throws with actionable advice when no checkout is present.
+ * Locate the capture engine's API module.
+ * Throws with actionable advice when the vendored sources are missing.
  */
 function resolveApiPath(explicitDir) {
   const tried = [];
@@ -39,8 +39,9 @@ function resolveApiPath(explicitDir) {
     if (fs.existsSync(apiPath)) return apiPath;
   }
   throw new Error(
-    'SingleFile not found. Run `npm run setup` to fetch the submodule, or set ' +
-      `SINGLEFILE_DIR in .env. Looked for:\n  ${tried.join('\n  ')}`
+    'Capture engine not found. It ships in this repository under ' +
+      'vendor/capture-engine - restore it, or set CAPTURE_ENGINE_DIR in .env. ' +
+      `Looked for:\n  ${tried.join('\n  ')}`
   );
 }
 
@@ -55,17 +56,17 @@ class Archiver {
     this.config = config;
     this.logger = logger;
     this.errorsFile = errorsFile;
-    this._singlefile = null;
+    this._engine = null;
     this._errorsOffset = 0;
     this.browserLaunched = false;
   }
 
-  /** Launch the browser and initialize SingleFile. Idempotent. */
+  /** Launch the browser and initialize the capture engine. Idempotent. */
   async _ensureStarted() {
-    if (this._singlefile) return this._singlefile;
+    if (this._engine) return this._engine;
 
-    const apiPath = resolveApiPath(this.config.singlefile.dir);
-    this.logger.debug(`SingleFile API: ${apiPath}`);
+    const apiPath = resolveApiPath(this.config.engine.dir);
+    this.logger.debug(`Capture engine API: ${apiPath}`);
     const api = await import(pathToFileURL(apiPath).href);
 
     const options = {
@@ -83,20 +84,20 @@ class Archiver {
       filenameConflictAction: 'overwrite',
       errorsFile: this.errorsFile,
     };
-    if (this.config.singlefile.browserExecutablePath) {
-      options.browserExecutablePath = this.config.singlefile.browserExecutablePath;
+    if (this.config.engine.browserExecutablePath) {
+      options.browserExecutablePath = this.config.engine.browserExecutablePath;
     }
 
-    this._singlefile = await api.initialize(options);
+    this._engine = await api.initialize(options);
     this.browserLaunched = true;
     this.logger.debug(
       `Browser launched (workers=${this.config.workers}, ` +
         `deferredImagesMaxIdle=${this.config.deferredImagesMaxIdleMs}ms)`
     );
-    return this._singlefile;
+    return this._engine;
   }
 
-  /** New text appended to the SingleFile errors log since the last read. */
+  /** New text appended to the engine errors log since the last read. */
   _readNewErrors() {
     try {
       if (!fs.existsSync(this.errorsFile)) return '';
@@ -117,7 +118,7 @@ class Archiver {
     }
   }
 
-  /** Map SingleFile's error log entries back onto the URLs of this batch. */
+  /** Map the engine's error log entries back onto the URLs of this batch. */
   _errorsByUrl(text) {
     const byUrl = new Map();
     if (!text) return byUrl;
@@ -136,12 +137,12 @@ class Archiver {
    * `jobs` is [{ url, filePath }]. Resolves with one result per job:
    * { url, filePath, ok, error? } - never rejects, so a single bad page can
    * never abort the crawl. A page counts as archived only when its file
-   * actually exists: SingleFile reports failures out-of-band and does not
+   * actually exists: the engine reports failures out-of-band and does not
    * reject the capture call.
    */
   async archiveBatch(jobs) {
     if (jobs.length === 0) return [];
-    const singlefile = await this._ensureStarted();
+    const engine = await this._ensureStarted();
 
     for (const job of jobs) {
       await fs.promises.mkdir(path.dirname(job.filePath), { recursive: true });
@@ -150,7 +151,7 @@ class Archiver {
     let captureError = null;
     const startedAt = Date.now();
     try {
-      await singlefile.capture(jobs.map((job) => [job.url, { output: job.filePath }]));
+      await engine.capture(jobs.map((job) => [job.url, { output: job.filePath }]));
     } catch (error) {
       // A whole-batch failure (e.g. the browser died) still has to be reported
       // per page rather than thrown away.
@@ -179,7 +180,7 @@ class Archiver {
         error:
           errors.get(job.url) ||
           captureError ||
-          (exists ? 'SingleFile wrote an empty file' : 'SingleFile produced no output file'),
+          (exists ? 'capture wrote an empty file' : 'capture produced no output file'),
       };
     });
 
@@ -192,14 +193,14 @@ class Archiver {
 
   /** Close the browser. Safe to call even if nothing was ever archived. */
   async close() {
-    if (!this._singlefile) return;
+    if (!this._engine) return;
     try {
-      await this._singlefile.finish();
+      await this._engine.finish();
       this.logger.debug('Browser closed');
     } catch (error) {
       this.logger.warn(`Could not close the browser cleanly: ${error.message}`);
     } finally {
-      this._singlefile = null;
+      this._engine = null;
     }
   }
 }

@@ -76,8 +76,9 @@ function buildConfig(startUrl, cliOptions) {
       '--deferred-images-idle'
     ),
 
-    singlefile: {
-      dir: env.SINGLEFILE_DIR || null,
+    engine: {
+      // SINGLEFILE_DIR still works so existing .env files keep functioning.
+      dir: env.CAPTURE_ENGINE_DIR || env.SINGLEFILE_DIR || null,
       browserExecutablePath: env.BROWSER_EXECUTABLE_PATH || null,
     },
 

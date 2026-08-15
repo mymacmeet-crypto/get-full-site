@@ -10,6 +10,53 @@ const { reportDir } = require('./utils/paths');
 const MAX_SKIPPED_DETAIL = 5000;
 
 /**
+ * Why a finished run archived fewer pages than --max-pages asked for.
+ *
+ * Every one of these is normal behaviour, but without an explanation a short
+ * count reads as a miscount, so the run says which it was. Returns null when
+ * the budget was met, when the run was cut short, or on a dry run (where
+ * "archived" means "would have been").
+ */
+function shortfallReason(report) {
+  const { downloaded, failed } = report.totals;
+  const budget = report.options.maxPages;
+  if (report.interrupted || report.options.dryRun) return null;
+  if (downloaded >= budget) return null;
+
+  const reasons = [];
+  const skipped = report.skippedByReason || {};
+
+  // Pages that were reached but deliberately not archived.
+  const existing = skipped['file-exists'] || 0;
+  if (existing) {
+    reasons.push(`${existing} already archived (use --overwrite to redo them)`);
+  }
+  if (failed) reasons.push(`${failed} failed`);
+
+  const duplicates =
+    (skipped['duplicate-canonical'] || 0) + (skipped['already-visited-alias'] || 0);
+  if (duplicates) reasons.push(`${duplicates} duplicate of a page already taken`);
+
+  const outOfScope = Object.entries(skipped)
+    .filter(([reason]) => reason.startsWith('out-of-scope') || reason.startsWith('redirect-'))
+    .reduce((sum, [, count]) => sum + count, 0);
+  if (outOfScope) reasons.push(`${outOfScope} out of scope`);
+
+  if (skipped['robots-disallowed']) {
+    reasons.push(`${skipped['robots-disallowed']} disallowed by robots.txt`);
+  }
+
+  // Nothing pending means the crawl simply ran out of pages to take, which is
+  // the usual answer: the site had fewer reachable pages than the budget.
+  const pending = skipped['max-pages-reached'] || 0;
+  if (pending === 0) {
+    reasons.push('no linked pages left to crawl (try a higher --depth)');
+  }
+
+  return reasons.length > 0 ? reasons.join(', ') : null;
+}
+
+/**
  * Collects per-page outcomes during the crawl and renders them as JSON plus a
  * human-readable console summary. Everything it writes lands in report/.
  */
@@ -206,6 +253,11 @@ class CrawlReport {
       }`,
       `  Failed:            ${t.failed}`,
     ];
+
+    // "I asked for 20 pages and got 17" reads as a bug unless the run says why.
+    const shortfall = shortfallReason(report);
+    if (shortfall) lines.push(`  Short of --max-pages ${report.options.maxPages}: ${shortfall}`);
+
     if (report.failedUrls.length > 0) {
       lines.push('  Failures:');
       for (const failure of report.failedUrls.slice(0, 10)) {

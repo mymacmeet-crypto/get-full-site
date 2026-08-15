@@ -66,7 +66,7 @@ class Crawler {
     this.archiver = new Archiver(
       config,
       this.logger,
-      path.join(this.reportDirectory, 'singlefile-errors.log')
+      path.join(this.reportDirectory, 'capture-errors.log')
     );
     this.robots = config.respectRobots
       ? new RobotsCache({
@@ -342,7 +342,7 @@ class Crawler {
         // A failed page gives its budget slot back so --max-pages counts
         // pages actually archived.
         this.processedCount--;
-        report.recordFailed({ url: job.url, error: result.error, stage: 'singlefile' });
+        report.recordFailed({ url: job.url, error: result.error, stage: 'capture' });
         logger.warn(`archive failed: ${job.url} -> ${result.error}`);
       }
     });

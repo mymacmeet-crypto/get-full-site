@@ -1,5 +1,5 @@
-# Rooted so it only hides the npm-managed tree at the repo root - the vendored
-# submodule under vendor/node_modules/ is checked in on purpose.
+# Rooted so it only hides npm's tree at the repo root. vendor/ holds the
+# capture engine and its CDP driver as plain checked-in source.
 /node_modules/
 /archive/
 .env

@@ -1,0 +1,727 @@
+/*
+ * Copyright 2010-2025 Gildas Lormeau
+ * contact : gildas.lormeau <at> gmail.com
+ * 
+ * This file is part of SingleFile.
+ *
+ *   The code in this file is free software: you can redistribute it and/or 
+ *   modify it under the terms of the GNU Affero General Public License 
+ *   (GNU AGPL) as published by the Free Software Foundation, either version 3
+ *   of the License, or (at your option) any later version.
+ * 
+ *   The code in this file is distributed in the hope that it will be useful, 
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of 
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero 
+ *   General Public License for more details.
+ *
+ *   As additional permission under GNU AGPL version 3 section 7, you may 
+ *   distribute UNMODIFIED VERSIONS OF THIS file without the copy of the GNU 
+ *   AGPL normally required by section 4, provided you include this license 
+ *   notice and a URL through which recipients can access the Corresponding 
+ *   Source.
+ */
+
+/* global setTimeout, clearTimeout, URL, AbortController */
+
+import {
+	launchBrowser,
+	closeBrowser
+} from "./browser.mjs";
+import {
+	CDP,
+	options
+} from "../../simple-cdp/mod.mjs";
+import {
+	FETCH_FUNCTION_NAME,
+	RESOLVE_FETCH_FUNCTION_NAME,
+	REJECT_FETCH_FUNCTION_NAME,
+	getScriptSource,
+	getHookScriptSource,
+	getPageDataScriptSource
+} from "./single-file-script.mjs";
+import {
+	fetch,
+	waitForTimeout,
+	arrayBufferToBase64,
+	getAlternativeUrl
+} from "./cdp-client-util.mjs";
+
+const LOAD_TIMEOUT_ERROR = "ERR_LOAD_TIMEOUT";
+const CAPTURE_TIMEOUT_ERROR = "ERR_CAPTURE_TIMEOUT";
+const NETWORK_STATES = ["InteractiveTime", "networkIdle", "networkAlmostIdle", "load", "DOMContentLoaded"];
+const MINIMIZED_WINDOW_STATE = "minimized";
+const SINGLE_FILE_WORLD_NAME = "singlefile";
+const CAPTURE_SCREENSHOT_FUNCTION_NAME = "captureScreenshot";
+const PRINT_TO_PDF_FUNCTION_NAME = "printToPDF";
+const SET_SCREENSHOT_FUNCTION_NAME = "setScreenshot";
+const SET_PDF_FUNCTION_NAME = "setPDF";
+const SET_PAGE_DATA_FUNCTION_NAME = "setPageData";
+const BINDING_CALLED_EVENT_TYPE = "bindingCalled";
+
+export {
+	initialize,
+	getPageData,
+	closeBrowser
+};
+
+async function initialize(singleFileOptions) {
+	if (singleFileOptions.browserServer) {
+		options.apiUrl = singleFileOptions.browserServer;
+	} else {
+		const LOCALHOST = "http://localhost:";
+		const browserOptions = {};
+		browserOptions.args = singleFileOptions.browserArgs;
+		browserOptions.headless = singleFileOptions.browserHeadless;
+		browserOptions.executablePath = singleFileOptions.browserExecutablePath;
+		browserOptions.debug = singleFileOptions.browserDebug;
+		browserOptions.disableWebSecurity = singleFileOptions.browserDisableWebSecurity;
+		browserOptions.width = singleFileOptions.browserWidth;
+		browserOptions.height = singleFileOptions.browserHeight;
+		browserOptions.userAgent = singleFileOptions.userAgent;
+		browserOptions.httpProxyServer = singleFileOptions.httpProxyServer;
+		options.apiUrl = LOCALHOST + (await launchBrowser(browserOptions));
+	}
+}
+
+async function getPageData(options) {
+	const EMPTY_PAGE_URL = "about:blank";
+	const pageContext = { options, consoleMessages: [], debugMessages: [], httpInfo: {} };
+	let targetInfo, cdp;
+	try {
+		logData(["Loading page", EMPTY_PAGE_URL], pageContext);
+		targetInfo = await CDP.createTarget(EMPTY_PAGE_URL);
+		cdp = new CDP(targetInfo);
+		await setupConsoleLogging(cdp, pageContext);
+		await setupBrowserWindow(cdp, targetInfo.id, pageContext);
+		await setupSecurity(cdp, pageContext);
+		await setupDeviceEmulation(cdp, pageContext);
+		await setupNetworkInterception(cdp, pageContext);
+		await setupScriptInjection(cdp, pageContext);
+		const contextId = await getContextId(cdp, pageContext);
+		const pageDataPromise = setupPageDataCapture(cdp, contextId, pageContext);
+		await setupBindings(cdp, contextId, pageContext);
+		await capturePageData(cdp, contextId, pageContext);
+		await disableCdpDomains(cdp, pageContext);
+		return await finalizePageData(pageDataPromise, pageContext);
+	} catch (error) {
+		if (shouldRetryWithFallback(error)) {
+			return await retryWithFallback();
+		}
+		attachDebugInfo(error, pageContext);
+		throw error;
+	} finally {
+		logData(["Closing page"], pageContext);
+		await closeTarget();
+		logData(["Finishing"], pageContext);
+	}
+
+	function shouldRetryWithFallback(error) {
+		return error.code === LOAD_TIMEOUT_ERROR &&
+			options.browserWaitUntilFallback &&
+			options.browserWaitUntil &&
+			NETWORK_STATES.indexOf(options.browserWaitUntil) < NETWORK_STATES.length - 1;
+	}
+
+	async function retryWithFallback() {
+		const browserWaitUntil = NETWORK_STATES[(NETWORK_STATES.indexOf(options.browserWaitUntil) + 1)];
+		logData(["Retrying with waitUntil", browserWaitUntil], pageContext);
+		options.browserWaitUntil = browserWaitUntil;
+		await closeTarget();
+		return await getPageData(options);
+	}
+
+	async function closeTarget() {
+		if (targetInfo && !options.browserDebug) {
+			await CDP.closeTarget(targetInfo.id);
+			targetInfo = null;
+		}
+		// the connection is closed even when the target is left open for
+		// debugging, otherwise it stays open until the process exits
+		if (cdp) {
+			cdp.reset();
+			cdp = null;
+		}
+	}
+}
+
+async function setupConsoleLogging({ Console }, { options, consoleMessages, debugMessages }) {
+	const CONSOLE_MESSAGE_ADDED_EVENT_TYPE = "messageAdded";
+	if (options.consoleMessagesFile) {
+		logData(["Enabling console messages"], { options, debugMessages });
+		await Console.enable();
+		Console.addEventListener(CONSOLE_MESSAGE_ADDED_EVENT_TYPE, ({ params }) => {
+			consoleMessages.push(params.message);
+		});
+	}
+}
+
+async function setupBrowserWindow({ Browser }, targetId, { options, debugMessages }) {
+	if (options.browserStartMinimized) {
+		const { windowId, bounds } = await Browser.getWindowForTarget({ targetId });
+		if (bounds.windowState !== MINIMIZED_WINDOW_STATE) {
+			logData(["Minimizing window"], { options, debugMessages });
+			await Browser.setWindowBounds({ windowId, bounds: { windowState: MINIMIZED_WINDOW_STATE } });
+		}
+	}
+}
+
+async function setupSecurity({ Security }, { options, debugMessages }) {
+	if (options.browserIgnoreHTTPSErrors !== undefined && options.browserIgnoreHTTPSErrors) {
+		logData(["Ignoring HTTPS errors"], { options, debugMessages });
+		await Security.setIgnoreCertificateErrors({ ignore: true });
+	}
+}
+
+async function setupDeviceEmulation({ Browser, Emulation, Runtime }, { options, debugMessages }) {
+	const needsDeviceMetrics = options.browserMobileEmulation || options.browserDeviceWidth ||
+		options.browserDeviceHeight || options.browserDeviceScaleFactor;
+	const needsUserAgent = options.browserMobileEmulation || options.platform || options.acceptLanguage;
+	if (needsDeviceMetrics) {
+		await setupDeviceMetrics({ Emulation, Runtime }, { options, debugMessages });
+	}
+	if (needsUserAgent) {
+		await setupUserAgent({ Browser, Emulation }, { options, debugMessages });
+	}
+}
+
+async function setupDeviceMetrics({ Emulation, Runtime }, { options, debugMessages }) {
+	const INNER_WIDTH_PROPERTY = "window.innerWidth";
+	const INNER_HEIGHT_PROPERTY = "window.innerHeight";
+	const DEVICE_PIXEL_RATIO_PROPERTY = "window.devicePixelRatio";
+	const browserDeviceWidth = options.browserDeviceWidth ||
+		(await Runtime.evaluate({ expression: INNER_WIDTH_PROPERTY })).result.value;
+	const browserDeviceHeight = options.browserDeviceHeight ||
+		(await Runtime.evaluate({ expression: INNER_HEIGHT_PROPERTY })).result.value;
+	const browserDeviceScaleFactor = options.browserDeviceScaleFactor ||
+		(await Runtime.evaluate({ expression: DEVICE_PIXEL_RATIO_PROPERTY })).result.value;
+	const deviceMetricsOptions = {
+		mobile: Boolean(options.browserMobileEmulation),
+		width: options.browserDeviceWidth || (options.browserMobileEmulation ? 360 : options.width || browserDeviceWidth),
+		height: options.browserDeviceHeight || (options.browserMobileEmulation ? 800 : options.height || browserDeviceHeight),
+		deviceScaleFactor: options.browserDeviceScaleFactor || (options.browserMobileEmulation ? 2 : browserDeviceScaleFactor)
+	};
+	logData(["Emulating device metrics", JSON.stringify(deviceMetricsOptions)], { options, debugMessages });
+	await Emulation.setDeviceMetricsOverride(deviceMetricsOptions);
+}
+
+async function setupUserAgent({ Browser, Emulation }, { options, debugMessages }) {
+	const ANDROID_PLATFORM = "Android";
+	const { userAgent, product } = await Browser.getVersion();
+	const defaultMobileUA = `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) ${product} Mobile Safari/537.36`;
+	const agentOptions = {
+		userAgent: options.userAgent || (options.browserMobileEmulation ? defaultMobileUA : userAgent)
+	};
+	if (options.acceptLanguage) {
+		agentOptions.acceptLanguage = options.acceptLanguage;
+	}
+	if (options.platform || options.browserMobileEmulation) {
+		agentOptions.platform = options.platform || ANDROID_PLATFORM;
+	}
+	logData(["Emulating user agent", JSON.stringify(agentOptions)], { options, debugMessages });
+	await Emulation.setUserAgentOverride(agentOptions);
+}
+
+async function setupNetworkInterception({ Browser, Emulation, Fetch, Network }, { options, debugMessages, httpInfo }) {
+	const REQUEST_STAGE = "Request";
+	const RESPONSE_STAGE = "Response";
+	const DENY_BEHAVIOR = "deny";
+	const handleAuthRequests = Boolean(options.httpProxyUsername);
+	const patterns = handleAuthRequests ?
+		[{ requestStage: REQUEST_STAGE }, { requestStage: RESPONSE_STAGE }] :
+		[{ requestStage: RESPONSE_STAGE }];
+	await Fetch.enable({ handleAuthRequests, patterns });
+	if (handleAuthRequests) {
+		setupProxyAuth({ Fetch }, { options, debugMessages });
+	}
+	setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo });
+	if (options.httpHeaders) {
+		await setupHttpHeaders({ Network }, { options, debugMessages });
+	}
+	if (options.emulateMediaFeatures) {
+		await setupMediaFeatures({ Emulation }, { options, debugMessages });
+	}
+	if (options.browserCookies && options.browserCookies.length) {
+		await setupCookies({ Network }, { options, debugMessages });
+	}
+	await Browser.setDownloadBehavior({ behavior: DENY_BEHAVIOR });
+}
+
+function setupProxyAuth({ Fetch }, { options, debugMessages }) {
+	const AUTH_REQUIRED_EVENT_TYPE = "authRequired";
+	const PROVIDE_CREDENTIALS_RESPONSE = "ProvideCredentials";
+	Fetch.addEventListener(AUTH_REQUIRED_EVENT_TYPE, ignoringErrors(async ({ params }) => {
+		logData(["Authenticating"], { options, debugMessages });
+		await Fetch.continueWithAuth({
+			requestId: params.requestId,
+			authChallengeResponse: {
+				response: PROVIDE_CREDENTIALS_RESPONSE,
+				username: options.httpProxyUsername,
+				password: options.httpProxyPassword
+			}
+		});
+	}, { options, debugMessages }));
+}
+
+function setupRequestInterception({ Fetch }, { options, debugMessages, httpInfo }) {
+	const REQUEST_PAUSED_EVENT_TYPE = "requestPaused";
+	const ABORTED_ERROR_REASON = "Aborted";
+	const urlState = { url: options.url, alternativeUrl: getAlternativeUrl(options.url) };
+	// compiled here so that an invalid pattern is reported before the page is
+	// loaded, instead of throwing for every request that is intercepted
+	const blockedURLPatterns = (options.blockedURLPatterns || []).map(pattern => new RegExp(pattern));
+	Fetch.addEventListener(REQUEST_PAUSED_EVENT_TYPE, ignoringErrors(async ({ params }) => {
+		const { requestId, request } = params;
+		// the request is always resumed below, otherwise the page waits for it
+		// until the load timeout expires
+		let blocked = false;
+		try {
+			captureHttpInfo(params, urlState, { options, debugMessages, httpInfo });
+			blocked = shouldBlockRequest(request.url);
+		} catch (error) {
+			logData(["Ignoring request interception error", error.message], { options, debugMessages });
+		}
+		if (blocked) {
+			try {
+				await Fetch.failRequest({ requestId, errorReason: ABORTED_ERROR_REASON });
+				return;
+			} catch {
+				// ignored
+			}
+		}
+		try {
+			await Fetch.continueRequest({ requestId });
+		} catch {
+			// ignored
+		}
+	}, { options, debugMessages }));
+
+	function shouldBlockRequest(requestUrl) {
+		const blockedURL = blockedURLPatterns.some(pattern => pattern.test(requestUrl));
+		if (blockedURL) {
+			logData(["Blocking request", requestUrl], { options, debugMessages });
+			return true;
+		}
+		return false;
+	}
+}
+
+function captureHttpInfo(params, urlState, { options, debugMessages, httpInfo }) {
+	const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
+	const DOCUMENT_RESOURCE_TYPE = "Document";
+	const LOCATION_HEADER_NAME = "location";
+	const { request, resourceType, responseHeaders, responseStatusCode, responseStatusText } = params;
+	const shouldCapture = resourceType === DOCUMENT_RESOURCE_TYPE &&
+		options.outputJson &&
+		!httpInfo.request &&
+		responseStatusCode !== undefined &&
+		(request.url === urlState.url || request.url === urlState.alternativeUrl);
+	if (shouldCapture) {
+		if (REDIRECT_STATUS_CODES.includes(responseStatusCode)) {
+			const redirect = responseHeaders.find(header => header.name.toLowerCase() === LOCATION_HEADER_NAME)?.value;
+			if (redirect) {
+				urlState.url = new URL(redirect, urlState.url).href;
+			}
+			logData(["Redirecting", urlState.url], { options, debugMessages });
+		} else {
+			Object.assign(httpInfo, {
+				request: {
+					url: request.url,
+					method: request.method,
+					headers: request.headers,
+					referrerPolicy: request.referrerPolicy
+				},
+				resourceType,
+				response: {
+					status: responseStatusCode,
+					statusText: responseStatusText,
+					headers: responseHeaders
+				}
+			});
+		}
+	}
+}
+
+async function setupHttpHeaders({ Network }, { options, debugMessages }) {
+	logData(["Setting HTTP headers", JSON.stringify(options.httpHeaders)], { options, debugMessages });
+	await Network.enable();
+	await Network.setExtraHTTPHeaders({ headers: options.httpHeaders });
+}
+
+async function setupMediaFeatures({ Emulation }, { options, debugMessages }) {
+	for (const mediaFeature of options.emulateMediaFeatures) {
+		logData(["Emulating media feature", mediaFeature.name, mediaFeature.value], { options, debugMessages });
+		await Emulation.setEmulatedMedia({
+			media: mediaFeature.name,
+			features: mediaFeature.value.split(",").map(feature => feature.trim())
+		});
+	}
+}
+
+async function setupCookies({ Network }, { options, debugMessages }) {
+	logData(["Setting cookies", JSON.stringify(options.browserCookies)], { options, debugMessages });
+	await Network.setCookies({ cookies: options.browserCookies });
+}
+
+async function setupScriptInjection({ Page }, { options }) {
+	await Page.addScriptToEvaluateOnNewDocument({
+		source: getHookScriptSource(),
+		runImmediately: true
+	});
+	await Page.addScriptToEvaluateOnNewDocument({
+		source: await getScriptSource(options),
+		runImmediately: true,
+		worldName: SINGLE_FILE_WORLD_NAME
+	});
+}
+
+async function getContextId({ Debugger, Page, Runtime }, { options, debugMessages }) {
+	const [contextId] = await Promise.all([
+		loadPage({ Page, Runtime }, { options, debugMessages }),
+		options.browserDebug ? waitForDebuggerReady() : Promise.resolve()
+	]);
+	return contextId;
+
+	async function waitForDebuggerReady() {
+		await Debugger.enable();
+		await Debugger.pause();
+		await new Promise(resolve => {
+			const RESUMED_EVENT = "resumed";
+			Debugger.addEventListener(RESUMED_EVENT, onResumed);
+			function onResumed() {
+				Debugger.removeEventListener(RESUMED_EVENT, onResumed);
+				resolve();
+			}
+		});
+	}
+}
+
+async function loadPage({ Page, Runtime }, { options, debugMessages }) {
+	const LOAD_TIMEOUT_ERROR_MESSAGE = "Load timeout";
+	await Runtime.enable();
+	await Page.enable();
+	await Page.setLifecycleEventsEnabled({ enabled: true });
+	// the ID of the top frame is stable, and it is read before the navigation is
+	// triggered so that no event is missed while the browser answers
+	const { frameTree } = await Page.getFrameTree();
+	const loadTimeoutAbortController = new AbortController();
+	const loadTimeoutAbortSignal = loadTimeoutAbortController.signal;
+	try {
+		logData(["Loading page", options.url], { options, debugMessages });
+		const [contextId] = await Promise.race([
+			Promise.all([
+				getTopFrameContextId({ Page, Runtime }, frameTree.frame.id, { options, debugMessages }),
+				Page.navigate({ url: options.url })
+			]),
+			waitForTimeout(loadTimeoutAbortSignal, options.browserLoadMaxTime, LOAD_TIMEOUT_ERROR_MESSAGE, LOAD_TIMEOUT_ERROR)
+		]);
+		return contextId;
+	} finally {
+		if (!loadTimeoutAbortSignal.aborted) {
+			loadTimeoutAbortController.abort();
+		}
+		await Page.setLifecycleEventsEnabled({ enabled: false });
+		await Runtime.disable();
+		await Page.disable();
+	}
+}
+
+// the listeners are registered synchronously, before the navigation triggered
+// in parallel by the caller can produce any event
+async function getTopFrameContextId({ Page, Runtime }, topFrameId, { options, debugMessages }) {
+	await waitForPageReadyState({ Page }, { topFrameId }, { options, debugMessages });
+	return await getSingleFileContext({ Page, Runtime }, topFrameId, { options, debugMessages });
+}
+
+async function waitForPageReadyState({ Page }, state, { options, debugMessages }) {
+	const LIFE_CYCLE_EVENT_TYPE = "lifecycleEvent";
+	const FRAME_NAVIGATED_EVENT_TYPE = "frameNavigated";
+	await new Promise((resolve, reject) => {
+		const timeoutState = { timeoutId: undefined };
+		const cleanup = () => {
+			Page.removeEventListener(LIFE_CYCLE_EVENT_TYPE, onLifecycleEvent);
+			Page.removeEventListener(FRAME_NAVIGATED_EVENT_TYPE, onFrameNavigated);
+		};
+		const onLifecycleEvent = createLifecycleEventHandler(state, timeoutState, resolve, cleanup, { options, debugMessages });
+		const onFrameNavigated = createFrameNavigatedHandler(timeoutState, reject, cleanup, { options, debugMessages });
+		Page.addEventListener(LIFE_CYCLE_EVENT_TYPE, onLifecycleEvent);
+		Page.addEventListener(FRAME_NAVIGATED_EVENT_TYPE, onFrameNavigated);
+	});
+}
+
+function createLifecycleEventHandler(state, timeoutState, resolve, cleanup, { options, debugMessages }) {
+	return ({ params }) => {
+		const { frameId, name } = params;
+		if (frameId === state.topFrameId) {
+			logData(["Detecting lifecycle event", name], { options, debugMessages });
+		}
+		const shouldResolve = name === options.browserWaitUntil ||
+			(timeoutState.timeoutId && NETWORK_STATES.indexOf(name) < NETWORK_STATES.indexOf(options.browserWaitUntil));
+		if (shouldResolve) {
+			// the delay is restarted when the page reaches a further state, so
+			// that it is captured once it stopped settling
+			clearTimeout(timeoutState.timeoutId);
+			logData([`Waiting ${options.browserWaitUntilDelay} ms`], { options, debugMessages });
+			timeoutState.timeoutId = setTimeout(() => {
+				logData(["Detecting page ready"], { options, debugMessages });
+				cleanup();
+				resolve();
+			}, options.browserWaitUntilDelay);
+		}
+	};
+};
+
+function createFrameNavigatedHandler(timeoutState, reject, cleanup, { options, debugMessages }) {
+	const UNREACHABLE_URL_ERROR_MESSAGE = "Unreachable URL";
+	return ({ params }) => {
+		const { frame } = params;
+		if (!frame.parentId && frame.unreachableUrl) {
+			logData(["Detecting unreachable URL", frame.unreachableUrl], { options, debugMessages });
+			clearTimeout(timeoutState.timeoutId);
+			cleanup();
+			reject(new Error(UNREACHABLE_URL_ERROR_MESSAGE + ": " + frame.unreachableUrl));
+		}
+	};
+}
+
+async function getSingleFileContext({ Page, Runtime }, topFrameId, { options, debugMessages }) {
+	const SINGLE_FILE_DETECTION_TEST = "typeof singlefile !== 'undefined'";
+	const NO_VALID_CONTEXT_ERROR_MESSAGE = "No valid SingleFile execution context found";
+	logData(["Getting execution context"], { options, debugMessages });
+	// the world already exists, so asking for it by name returns the context the
+	// injected script ran in instead of creating another one
+	const { executionContextId } = await Page.createIsolatedWorld({
+		frameId: topFrameId,
+		worldName: SINGLE_FILE_WORLD_NAME
+	});
+	// an empty world is returned when the script could not be injected, so the
+	// context is checked before it is used to capture the page
+	const { result } = await Runtime.evaluate({
+		expression: SINGLE_FILE_DETECTION_TEST,
+		contextId: executionContextId
+	});
+	if (result.value !== true) {
+		throw new Error(NO_VALID_CONTEXT_ERROR_MESSAGE);
+	}
+	return executionContextId;
+}
+
+function setupPageDataCapture({ Runtime }, _contextId, { options, debugMessages }) {
+	return new Promise(resolve => {
+		let pageDataResponse = "";
+		Runtime.addEventListener(BINDING_CALLED_EVENT_TYPE, ({ params }) => {
+			if (params.name === SET_PAGE_DATA_FUNCTION_NAME) {
+				const { payload } = params;
+				if (payload.length) {
+					pageDataResponse += payload;
+				} else {
+					logData(["Setting page data"], { options, debugMessages });
+					const result = JSON.parse(pageDataResponse);
+					if (result.content instanceof Array) {
+						result.content = new Uint8Array(result.content);
+					}
+					resolve(result);
+				}
+			}
+		});
+	});
+}
+
+async function setupBindings({ Page, Runtime }, contextId, { options, debugMessages }) {
+	await Runtime.addBinding({ name: SET_PAGE_DATA_FUNCTION_NAME, executionContextId: contextId });
+	if (options.embedScreenshot && options.compressContent) {
+		await setupScreenshotCapture({ Page, Runtime }, contextId, { options, debugMessages });
+	}
+	if (options.embedPdf) {
+		await setupPdfCapture({ Page, Runtime }, contextId, { options, debugMessages });
+	}
+	await Runtime.addBinding({ name: FETCH_FUNCTION_NAME, executionContextId: contextId });
+	Runtime.addEventListener(BINDING_CALLED_EVENT_TYPE, ignoringErrors(async ({ params }) => {
+		if (params.name === FETCH_FUNCTION_NAME) {
+			await handleFetchRequest({ Runtime }, params, contextId, { options, debugMessages });
+		}
+	}, { options, debugMessages }));
+}
+
+async function setupScreenshotCapture({ Page, Runtime }, contextId, { options, debugMessages }) {
+	await Runtime.addBinding({ name: CAPTURE_SCREENSHOT_FUNCTION_NAME, executionContextId: contextId });
+	Runtime.addEventListener(BINDING_CALLED_EVENT_TYPE, ignoringErrors(async ({ params }) => {
+		if (params.name === CAPTURE_SCREENSHOT_FUNCTION_NAME) {
+			logData(["Capturing screenshot"], { options, debugMessages });
+			try {
+				const screenshotOptions = parseScreenshotOptions(options.embedScreenshotOptions);
+				const { data } = await Page.captureScreenshot(screenshotOptions);
+				await callBrowserFunction({ Runtime }, contextId, SET_SCREENSHOT_FUNCTION_NAME, [data]);
+			} catch {
+				await callBrowserFunction({ Runtime }, contextId, SET_SCREENSHOT_FUNCTION_NAME, [""]);
+			}
+		}
+	}, { options, debugMessages }));
+
+	function parseScreenshotOptions(optionsString) {
+		const PNG_FORMAT = "png";
+		let screenshotOptions = { captureBeyondViewport: true };
+		if (optionsString) {
+			try {
+				screenshotOptions = JSON.parse(optionsString);
+			} catch {
+				// ignored
+			}
+		}
+		screenshotOptions.format = PNG_FORMAT;
+		return screenshotOptions;
+	}
+}
+
+async function setupPdfCapture({ Page, Runtime }, contextId, { options, debugMessages }) {
+	await Runtime.addBinding({ name: PRINT_TO_PDF_FUNCTION_NAME, executionContextId: contextId });
+	Runtime.addEventListener(BINDING_CALLED_EVENT_TYPE, ignoringErrors(async ({ params }) => {
+		if (params.name === PRINT_TO_PDF_FUNCTION_NAME) {
+			logData(["Printing to PDF", options.embedPdfOptions || ""], { options, debugMessages });
+			const pdfOptions = parsePdfOptions(options.embedPdfOptions);
+			try {
+				const { data } = await Page.printToPDF(pdfOptions);
+				await callBrowserFunction({ Runtime }, contextId, SET_PDF_FUNCTION_NAME, [data]);
+			} catch {
+				await callBrowserFunction({ Runtime }, contextId, SET_PDF_FUNCTION_NAME, [""]);
+			}
+		}
+	}, { options, debugMessages }));
+
+	function parsePdfOptions(optionsString) {
+		let pdfOptions = {};
+		if (optionsString) {
+			try {
+				pdfOptions = JSON.parse(optionsString);
+			} catch {
+				// ignored
+			}
+		}
+		return pdfOptions;
+	}
+}
+
+async function handleFetchRequest({ Runtime }, params, contextId, { options, debugMessages }) {
+	const { payload } = params;
+	const { requestId, url, options: fetchOptions } = JSON.parse(payload);
+	logData(["Fetching URL", url], { options, debugMessages });
+	try {
+		const response = await fetch(url, fetchOptions);
+		const arrayBuffer = await response.arrayBuffer();
+		const base64Data = arrayBufferToBase64(arrayBuffer);
+		const result = {
+			status: response.status,
+			headers: Object.fromEntries(response.headers.entries()),
+			data: base64Data
+		};
+		await callBrowserFunction({ Runtime }, contextId, RESOLVE_FETCH_FUNCTION_NAME, [requestId, result]);
+	} catch (error) {
+		const errorResult = {
+			error: error.message,
+			code: error.code
+		};
+		await callBrowserFunction({ Runtime }, contextId, REJECT_FETCH_FUNCTION_NAME, [requestId, errorResult]);
+	}
+}
+
+async function callBrowserFunction({ Runtime }, contextId, functionName, args) {
+	const serializedArgs = args.map(arg => JSON.stringify(arg)).join(", ");
+	await Runtime.evaluate({
+		expression: `globalThis.${functionName}(${serializedArgs})`,
+		contextId
+	});
+}
+
+async function capturePageData({ Runtime }, contextId, { options, debugMessages }) {
+	const CAPTURE_TIMEOUT_ERROR_MESSAGE = "Capture timeout";
+	const ERROR_SUBTYPE = "error";
+	const captureTimeoutAbortController = new AbortController();
+	const captureTimeoutAbortSignal = captureTimeoutAbortController.signal;
+	if (options.browserWaitDelay) {
+		logData([`Waiting ${options.browserWaitDelay} ms`], { options, debugMessages });
+		await new Promise(resolve => setTimeout(resolve, options.browserWaitDelay));
+	}
+	try {
+		logData(["Capturing page"], { options, debugMessages });
+		const captureScript = `(${getPageDataScriptSource.toString()})(${JSON.stringify(options)},${JSON.stringify([
+			SET_SCREENSHOT_FUNCTION_NAME,
+			SET_PDF_FUNCTION_NAME,
+			SET_PAGE_DATA_FUNCTION_NAME,
+			CAPTURE_SCREENSHOT_FUNCTION_NAME,
+			PRINT_TO_PDF_FUNCTION_NAME
+		])})`;
+		const { result } = await Promise.race([
+			Runtime.evaluate({
+				expression: captureScript,
+				awaitPromise: true,
+				returnByValue: true,
+				contextId
+			}),
+			waitForTimeout(captureTimeoutAbortSignal, options.browserCaptureMaxTime, CAPTURE_TIMEOUT_ERROR_MESSAGE, CAPTURE_TIMEOUT_ERROR)
+		]);
+		if (result.subtype === ERROR_SUBTYPE) {
+			throw new Error(result.description);
+		}
+	} finally {
+		if (!captureTimeoutAbortSignal.aborted) {
+			captureTimeoutAbortController.abort();
+		}
+	}
+}
+
+async function disableCdpDomains({ Console, Fetch, Network, Page, Runtime }, { options }) {
+	// disabled first, so that the requests left paused are resumed by the
+	// browser instead of being held until the target is closed
+	await Fetch.disable();
+	await Runtime.disable();
+	await Page.disable();
+	if (options.httpHeaders) {
+		await Network.disable();
+	}
+	if (options.consoleMessagesFile) {
+		await Console.disable();
+	}
+}
+
+async function finalizePageData(pageDataPromise, { options, consoleMessages, debugMessages, httpInfo }) {
+	const pageData = await pageDataPromise;
+	logData(["Returning page data"], { options, debugMessages });
+	if (options.consoleMessagesFile) {
+		pageData.consoleMessages = consoleMessages;
+	}
+	if (options.debugMessagesFile) {
+		pageData.debugMessages = debugMessages;
+	}
+	Object.assign(pageData, httpInfo);
+	if (options.browserWaitEndDelay) {
+		logData([`Waiting ${options.browserWaitEndDelay} ms after processing`], { options, debugMessages });
+		await new Promise(resolve => setTimeout(resolve, options.browserWaitEndDelay));
+	}
+	return pageData;
+}
+
+function attachDebugInfo(error, { options, consoleMessages, debugMessages }) {
+	if (options.consoleMessagesFile) {
+		error.consoleMessages = consoleMessages;
+	}
+	if (options.debugMessagesFile) {
+		error.debugMessages = debugMessages;
+	}
+}
+
+function ignoringErrors(listener, pageContext) {
+	return async event => {
+		try {
+			await listener(event);
+		} catch (error) {
+			// the commands sent while the target is closing are rejected, and an
+			// error thrown here would be reported as an unhandled rejection
+			logData(["Ignoring event listener error", error.message], pageContext);
+		}
+	};
+}
+
+function logData(data, { options, debugMessages }) {
+	if (options.debugMessagesFile) {
+		debugMessages.push([Date.now(), data]);
+	}
+}

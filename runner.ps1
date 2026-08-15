@@ -168,22 +168,17 @@ function Test-Preflight {
     }
     Write-Ok 'dependencies installed'
 
-    # SingleFile lives in a submodule (AGPL, kept out of this repo's history).
-    $sfDir = $env:SINGLEFILE_DIR
-    if (-not $sfDir) { $sfDir = Get-EnvFileValue 'SINGLEFILE_DIR' }
-    if (-not $sfDir) { $sfDir = Join-Path $Root 'vendor\single-file-cli' }
+    # The capture engine is vendored into this repository - nothing to install.
+    $engineDir = $env:CAPTURE_ENGINE_DIR
+    if (-not $engineDir) { $engineDir = Get-EnvFileValue 'CAPTURE_ENGINE_DIR' }
+    if (-not $engineDir) { $engineDir = Join-Path $Root 'vendor\capture-engine' }
 
-    if (Test-Path (Join-Path $sfDir 'node_modules')) {
-        Write-Ok "SingleFile ready ($sfDir)"
+    if (Test-Path (Join-Path $engineDir 'capture-api.mjs')) {
+        Write-Ok "capture engine ready ($engineDir)"
     } else {
-        Write-Warn "SingleFile is not set up at $sfDir"
-        if (Read-YesNo 'run npm run setup now?' 'y') {
-            & npm run setup
-            if ($LASTEXITCODE -ne 0) { Stop-WithError 'npm run setup failed.' }
-            Write-Ok 'SingleFile ready'
-        } else {
-            Write-Note 'archiving will fail without it; a dry run still works'
-        }
+        Write-Bad "capture engine missing at $engineDir"
+        Write-Note 'it ships in vendor/capture-engine; restore it or set CAPTURE_ENGINE_DIR'
+        Write-Note 'a dry run still works without it'
     }
 }
 
