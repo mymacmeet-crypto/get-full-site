@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
@@ -18,6 +19,10 @@ const { pathToFileURL } = require('node:url');
  */
 
 const API_FILE = 'capture-api.mjs';
+
+/** Browser-side files shipped with the archiver, injected into every page. */
+const REVEAL_SCRIPT = path.join(__dirname, 'browser', 'reveal.js');
+const REVEAL_STYLESHEET = path.join(__dirname, 'browser', 'reveal.css');
 
 /** Candidate engine directories, most explicit first. */
 function candidateDirs(explicitDir) {
@@ -58,7 +63,34 @@ class Archiver {
     this.errorsFile = errorsFile;
     this._engine = null;
     this._errorsOffset = 0;
+    this._tempDir = null;
     this.browserLaunched = false;
+  }
+
+  /**
+   * Build the list of scripts injected into every page before it loads.
+   *
+   * The engine reads these from disk per page and concatenates them, so the
+   * reveal pass's knobs travel as a tiny generated file placed immediately
+   * before it. That keeps src/browser/reveal.js a plain, readable, unmodified
+   * source file rather than a template someone has to mentally expand.
+   */
+  _revealScripts() {
+    if (!this.config.revealAnimations) return [];
+
+    this._tempDir = this._tempDir || fs.mkdtempSync(path.join(os.tmpdir(), 'web-archiver-'));
+    const configFile = path.join(this._tempDir, 'reveal-config.js');
+    const settings = {
+      enabled: true,
+      maxScrollMs: this.config.revealScrollMs,
+    };
+    // The trailing semicolon and newline matter: the engine concatenates these
+    // files with no separator of its own.
+    fs.writeFileSync(
+      configFile,
+      `globalThis.__WEB_ARCHIVER_REVEAL__ = ${JSON.stringify(settings)};\n`
+    );
+    return [configFile, REVEAL_SCRIPT];
   }
 
   /** Launch the browser and initialize the capture engine. Idempotent. */
@@ -69,6 +101,12 @@ class Archiver {
     this.logger.debug(`Capture engine API: ${apiPath}`);
     const api = await import(pathToFileURL(apiPath).href);
 
+    const browserScripts = [...this._revealScripts(), ...this.config.browserScripts];
+    const browserStylesheets = [
+      ...(this.config.revealAnimations ? [REVEAL_STYLESHEET] : []),
+      ...this.config.browserStylesheets,
+    ];
+
     const options = {
       browserHeadless: true,
       browserLoadMaxTime: this.config.timeoutMs,
@@ -77,6 +115,17 @@ class Archiver {
       userAgent: this.config.userAgent,
       maxParallelWorkers: this.config.workers,
       loadDeferredImagesMaxIdleTime: this.config.deferredImagesMaxIdleMs,
+      // Pause after the page settles and before the capture script runs, so
+      // JavaScript-rendered content is in the DOM by the time it is saved.
+      // Costs one wait per batch rather than per page, since tabs run parallel.
+      browserWaitDelay: this.config.waitAfterLoadMs,
+      // The engine's default is to delete every element that is invisible at
+      // capture time. That is what makes reveal-on-scroll text disappear from
+      // an archived page, so with the reveal pass on it is turned off and the
+      // pass decides what is genuinely hidden instead. See src/browser/.
+      removeHiddenElements: this.config.removeHiddenElements,
+      browserScripts,
+      browserStylesheets,
       // An explicit `output` path is always supplied per page, so this returns
       // that exact path; the crawler decides itself whether to skip existing
       // files. It never combines with --output-directory, whose handling
@@ -92,8 +141,13 @@ class Archiver {
     this.browserLaunched = true;
     this.logger.debug(
       `Browser launched (workers=${this.config.workers}, ` +
-        `deferredImagesMaxIdle=${this.config.deferredImagesMaxIdleMs}ms)`
+        `deferredImagesMaxIdle=${this.config.deferredImagesMaxIdleMs}ms, ` +
+        `reveal=${this.config.revealAnimations ? `${this.config.revealScrollMs}ms` : 'off'}, ` +
+        `removeHiddenElements=${this.config.removeHiddenElements})`
     );
+    if (browserScripts.length) {
+      this.logger.debug(`Injected scripts: ${browserScripts.join(', ')}`);
+    }
     return this._engine;
   }
 
@@ -193,14 +247,23 @@ class Archiver {
 
   /** Close the browser. Safe to call even if nothing was ever archived. */
   async close() {
-    if (!this._engine) return;
-    try {
-      await this._engine.finish();
-      this.logger.debug('Browser closed');
-    } catch (error) {
-      this.logger.warn(`Could not close the browser cleanly: ${error.message}`);
-    } finally {
-      this._engine = null;
+    if (this._engine) {
+      try {
+        await this._engine.finish();
+        this.logger.debug('Browser closed');
+      } catch (error) {
+        this.logger.warn(`Could not close the browser cleanly: ${error.message}`);
+      } finally {
+        this._engine = null;
+      }
+    }
+    if (this._tempDir) {
+      try {
+        await fs.promises.rm(this._tempDir, { recursive: true, force: true });
+      } catch {
+        /* a leftover temp file is not worth a warning */
+      }
+      this._tempDir = null;
     }
   }
 }

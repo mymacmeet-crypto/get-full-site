@@ -31,5 +31,20 @@ stating that it was changed. The changes made to the upstream sources are:
      Dockerfile, the build/compile shell scripts, the CLI shell and batch
      wrappers, the .github workflow, and resources/single-file.ico.
 
-No other source line was altered. Diffing this directory against upstream
-v2.0.83 after undoing the renames above will show no functional change.
+  5. `capture-api.mjs` releases a task's `promise` and `options` once the task
+     reaches the "processed" state, and looks up already-queued URLs through a
+     Set instead of Array.includes. Every change is marked with a
+     `web-archiver:` comment at the site.
+
+     Upstream drives one process per invocation, so the task list living until
+     the process exits costs nothing. This project keeps a single engine alive
+     for a whole crawl and calls capture() once per batch, which turns that
+     into an unbounded leak: a resolved task promise pins its pageData, and
+     pageData is the complete captured document with every resource already
+     inlined as base64. A few hundred pages was enough to exhaust the heap. The
+     Set is the same situation for time rather than memory - the linear scan
+     was O(batch x run) per batch.
+
+Other than the above, no source line was altered. Diffing this directory
+against upstream v2.0.83, after undoing the renames in items 1-3, shows only
+the change described in item 5.

@@ -355,6 +355,18 @@ function Invoke-Wizard {
     Add-Arg $script:Url '--max-pages' $pages '--depth' $depth '--output' $script:Output
     if ($dryRun) { Add-Arg '--dry-run' }
 
+    Write-Section 'Linked files'
+    Write-Host "  $($C.Grey)PDFs and spreadsheets are linked, not embedded, so archiving a page$($C.R)"
+    Write-Host "  $($C.Grey)does not fetch them. Downloaded files land in assets/, and the saved$($C.R)"
+    Write-Host "  $($C.Grey)pages are repointed at them so the archive works offline.$($C.R)"
+    Write-Host ''
+    if (Read-YesNo 'Download linked files (PDFs, spreadsheets, ...)?' 'y') {
+        $script:Summary['Files'] = 'documents'
+    } else {
+        Add-Arg '--no-assets'
+        $script:Summary['Files'] = 'none'
+    }
+
     Write-Section 'Advanced'
     Write-Host "  $($C.Grey)filters, tuning, resume - defaults are fine for most sites$($C.R)"
     Write-Host ''
@@ -393,15 +405,46 @@ function Invoke-WizardAdvanced ([hashtable]$Defaults = @{}, [switch]$IsResume) {
     }
 
     Write-Host ''
+    # Blank keeps whatever the top-level "download linked files" answer set.
+    $assets = Read-Text 'File types to download (documents/archives/media/code/all/none, blank = keep)' (Prior 'assets' '')
+    if ($assets) {
+        Add-Arg '--assets' $assets
+        $script:Summary['Files'] = $assets
+    }
+    if ($assets -notmatch '^(none)$') {
+        $assetDomains = Read-Text 'Take files from which hosts (same/linked/any)' (Prior 'assetDomains' 'linked')
+        if ($assetDomains) { Add-Arg '--asset-domains' $assetDomains }
+        $maxAssets = Read-Int 'Maximum files to download' ([int](Prior 'maxAssets' 1000)) 1
+        $maxSize   = Read-Int 'Skip files larger than (MB)' ([int](Prior 'maxAssetSize' 100)) 1
+        Add-Arg '--max-assets' $maxAssets '--max-asset-size' $maxSize
+        if (-not (Read-YesNo 'Repoint saved pages at the downloaded files?' 'y')) {
+            Add-Arg '--no-rewrite-links'
+        }
+    }
+
+    Write-Host ''
     $workers     = Read-Int 'Parallel browser tabs per batch' ([int](Prior 'workers' 4)) 1
     $concurrency = Read-Int 'Parallel discovery fetches' ([int](Prior 'concurrency' 2)) 1
     $delay       = Read-Int 'Delay between requests (ms)' ([int](Prior 'delay' 500)) 0
     $timeout     = Read-Int 'Per-request / per-page timeout (ms)' ([int](Prior 'timeout' 30000)) 1000
     $idle        = Read-Int 'Lazy-image wait per page (ms; raise for image-heavy sites)' ([int](Prior 'idle' 500)) 0
+    $wait        = Read-Int 'Settle time after load, before capture (ms; for JS-rendered sites)' ([int](Prior 'wait' 600)) 0
     Add-Arg '--workers' $workers '--concurrency' $concurrency '--delay' $delay `
-            '--timeout' $timeout '--deferred-images-idle' $idle
+            '--timeout' $timeout '--deferred-images-idle' $idle '--wait' $wait
     $script:Summary['Tuning'] =
-        "$workers tabs, $concurrency fetches, ${delay}ms delay, ${timeout}ms timeout, ${idle}ms lazy-image wait"
+        "$workers tabs, $concurrency fetches, ${delay}ms delay, ${timeout}ms timeout, ${idle}ms lazy-image wait, ${wait}ms settle"
+
+    Write-Host ''
+    # Text that fades in on scroll is invisible to a capture that never
+    # scrolls, so this is on unless it is explicitly turned off.
+    if (-not (Read-YesNo 'Scroll pages before capturing (keeps text that animates in)?' 'y')) {
+        Add-Arg '--no-reveal-animations'
+        $script:Summary['Reveal'] = 'off'
+    } else {
+        $revealMs = Read-Int 'Scroll budget per page (ms)' ([int](Prior 'revealScrollMs' 4000)) 0
+        Add-Arg '--reveal-scroll-ms' $revealMs
+        $script:Summary['Reveal'] = "${revealMs}ms scroll"
+    }
 
     Write-Host ''
     $toggles = [ordered]@{}
@@ -410,7 +453,7 @@ function Invoke-WizardAdvanced ([hashtable]$Defaults = @{}, [switch]$IsResume) {
     if (-not $IsResume) {
         $toggles['--resume'] = Read-YesNo 'Resume a previous interrupted crawl?' 'n'
     }
-    $toggles['--overwrite']      = Read-YesNo 'Overwrite pages already in raw-html/?' 'n'
+    $toggles['--overwrite']      = Read-YesNo 'Overwrite files already in raw-html/ and assets/?' 'n'
     $toggles['--respect-robots'] = Read-YesNo 'Respect robots.txt disallow rules?' (& $yn (Prior 'respectRobots' 0))
     $toggles['--all-domains']    = Read-YesNo 'Follow links to external domains?' (& $yn (Prior 'allDomains' 0))
     $toggles['--verbose']        = Read-YesNo 'Verbose logging?' 'n'
@@ -473,6 +516,10 @@ function Invoke-Archive {
             $host_ = ([uri]$script:Url).Host
             $site = Join-Path $script:Output $host_
             Write-Host "  $($C.Grey)Pages$($C.R)   $site\raw-html\"
+            # assets\ only exists when the crawl actually downloaded something.
+            if (Test-Path (Join-Path $site 'assets')) {
+                Write-Host "  $($C.Grey)Files$($C.R)   $site\assets\"
+            }
             Write-Host "  $($C.Grey)Report$($C.R)  $site\report\crawl-report.json"
         }
         2 {

@@ -2,7 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { formatDuration } = require('./utils/misc');
+const { formatDuration, formatBytes } = require('./utils/misc');
 const { reportDir } = require('./utils/paths');
 
 // Full skipped-URL details are capped so a crawl of a heavily linked site
@@ -73,6 +73,14 @@ class CrawlReport {
     this.interrupted = false;
     this.sitemapInfo = null; // { found, sources, urlCount, seeded } when seeding ran
     this._seenSkips = new Set();
+
+    // Linked files are counted apart from pages throughout: they do not
+    // consume a --max-pages slot, and folding them into the page totals would
+    // make "20 of 20 pages archived" read as wrong on any site with PDFs.
+    this.assets = []; // { url, file, bytes, contentType, sha256, group, sources }
+    this.assetsFailed = []; // { url, error, sources }
+    this.assetsSkippedCounts = {}; // reason -> count
+    this._seenAssetSkips = new Set();
   }
 
   recordDownloaded(page) {
@@ -95,6 +103,20 @@ class CrawlReport {
     this.errors.push(message);
   }
 
+  recordAsset(entry) {
+    this.assets.push(entry);
+  }
+
+  recordAssetFailed(entry) {
+    this.assetsFailed.push(entry);
+  }
+
+  recordAssetSkipped(url, reason) {
+    if (this._seenAssetSkips.has(url)) return;
+    this._seenAssetSkips.add(url);
+    this.assetsSkippedCounts[reason] = (this.assetsSkippedCounts[reason] || 0) + 1;
+  }
+
   /** Restore counters from a resumed crawl's saved state. */
   restore(stats) {
     if (!stats) return;
@@ -105,6 +127,9 @@ class CrawlReport {
     this.failed = stats.failed || [];
     this.errors = stats.errors || [];
     this.sitemapInfo = stats.sitemapInfo || null;
+    this.assets = stats.assets || [];
+    this.assetsFailed = stats.assetsFailed || [];
+    this.assetsSkippedCounts = stats.assetsSkippedCounts || {};
     this._seenSkips = new Set(this.skipped.map((s) => s.url));
   }
 
@@ -118,6 +143,9 @@ class CrawlReport {
       failed: this.failed,
       errors: this.errors,
       sitemapInfo: this.sitemapInfo,
+      assets: this.assets,
+      assetsFailed: this.assetsFailed,
+      assetsSkippedCounts: this.assetsSkippedCounts,
     };
   }
 
@@ -126,6 +154,15 @@ class CrawlReport {
     const skippedTotal = Object.values(this.skippedCounts).reduce((a, b) => a + b, 0);
     const archived = this.pages.filter((page) => page.file);
     const totalBytes = archived.reduce((sum, page) => sum + (page.bytes || 0), 0);
+    // A file linked under two URLs is stored once, so its bytes are counted
+    // once - otherwise the total claims disk use the archive does not have.
+    const assetBytes = this.assets.reduce(
+      (sum, asset) => sum + (asset.duplicateOf ? 0 : asset.bytes || 0),
+      0
+    );
+    const assetDuplicates = this.assets.filter((asset) => asset.duplicateOf).length;
+    const assetsSkippedTotal = Object.values(this.assetsSkippedCounts).reduce((a, b) => a + b, 0);
+    const rewrittenLinks = this.pages.reduce((sum, page) => sum + (page.rewrittenLinks || 0), 0);
 
     return {
       startUrl: this.config.startUrl,
@@ -146,12 +183,21 @@ class CrawlReport {
         batchSize: this.config.batchSize,
         timeoutMs: this.config.timeoutMs,
         deferredImagesMaxIdleMs: this.config.deferredImagesMaxIdleMs,
+        waitAfterLoadMs: this.config.waitAfterLoadMs,
         followRedirects: this.config.followRedirects,
         respectRobots: this.config.respectRobots,
         overwrite: this.config.overwrite,
         dryRun: this.config.dryRun,
         sitemapEnabled: this.config.sitemapEnabled,
         sitemapUrl: this.config.sitemapUrl,
+        assetMode: this.config.assetMode,
+        assetGroups: this.config.assetGroups,
+        assetExtensions: [...(this.config.assetExtensions || [])].sort(),
+        maxAssets: this.config.maxAssets,
+        maxAssetBytes: this.config.maxAssetBytes,
+        rewriteLinks: this.config.rewriteLinks,
+        revealAnimations: this.config.revealAnimations,
+        removeHiddenElements: this.config.removeHiddenElements,
       },
       sitemap: this.sitemapInfo || { found: false, sources: [], urlCount: 0, seeded: 0 },
       totals: {
@@ -160,12 +206,22 @@ class CrawlReport {
         skipped: skippedTotal,
         failed: this.failed.length,
         archivedBytes: totalBytes,
+        assets: this.assets.length,
+        assetFiles: this.assets.length - assetDuplicates,
+        assetDuplicates,
+        assetBytes,
+        assetsFailed: this.assetsFailed.length,
+        assetsSkipped: assetsSkippedTotal,
+        rewrittenLinks,
       },
       skippedByReason: this.skippedCounts,
       downloadedPages: this.pages,
       skippedUrls: this.skipped,
       skippedUrlsTruncated: this.skippedOverflow,
       failedUrls: this.failed,
+      downloadedAssets: this.assets,
+      failedAssets: this.assetsFailed,
+      assetsSkippedByReason: this.assetsSkippedCounts,
       errors: this.errors,
     };
   }
@@ -228,7 +284,8 @@ class CrawlReport {
   }
 
   /** Render the console summary. */
-  summary(report, reportFile, archiveSitemapFile) {
+  summary(report, files = {}) {
+    const { reportFile = null, archiveSitemapFile = null, manifestFile = null } = files;
     const t = report.totals;
     const sitemapLine = report.sitemap.found
       ? `${report.sitemap.seeded} URL(s) seeded from ${report.sitemap.sources.length} file(s)`
@@ -254,6 +311,38 @@ class CrawlReport {
       `  Failed:            ${t.failed}`,
     ];
 
+    if (report.options.assetMode !== 'off') {
+      const byGroup = {};
+      for (const asset of report.downloadedAssets) {
+        if (asset.duplicateOf) continue; // counted under the file it shares
+        const key = asset.group || asset.extension || 'other';
+        byGroup[key] = (byGroup[key] || 0) + 1;
+      }
+      const breakdown = Object.entries(byGroup)
+        .sort((a, b) => b[1] - a[1])
+        .map(([group, count]) => `${group}: ${count}`)
+        .join(', ');
+      lines.push(
+        `  Files downloaded:  ${t.assetFiles}` +
+          `${t.assetBytes ? ` (${formatBytes(t.assetBytes)})` : ''}` +
+          `${breakdown ? ` [${breakdown}]` : ''}` +
+          `${t.assetDuplicates ? `, ${t.assetDuplicates} more URL(s) were the same file` : ''}`
+      );
+      if (t.assetsFailed || t.assetsSkipped) {
+        const detail = Object.entries(report.assetsSkippedByReason)
+          .sort((a, b) => b[1] - a[1])
+          .map(([reason, count]) => `${reason.replace(/^asset-/, '')}: ${count}`)
+          .join(', ');
+        lines.push(
+          `  Files not taken:   ${t.assetsFailed} failed, ${t.assetsSkipped} skipped` +
+            `${detail ? ` (${detail})` : ''}`
+        );
+      }
+      if (t.rewrittenLinks) {
+        lines.push(`  Links localised:   ${t.rewrittenLinks} (now open from assets/)`);
+      }
+    }
+
     // "I asked for 20 pages and got 17" reads as a bug unless the run says why.
     const shortfall = shortfallReason(report);
     if (shortfall) lines.push(`  Short of --max-pages ${report.options.maxPages}: ${shortfall}`);
@@ -267,10 +356,20 @@ class CrawlReport {
         lines.push(`    ... and ${report.failedUrls.length - 10} more (see report)`);
       }
     }
+    if (report.failedAssets.length > 0) {
+      lines.push('  File failures:');
+      for (const failure of report.failedAssets.slice(0, 5)) {
+        lines.push(`    - ${failure.url} -> ${failure.error}`);
+      }
+      if (report.failedAssets.length > 5) {
+        lines.push(`    ... and ${report.failedAssets.length - 5} more (see report)`);
+      }
+    }
     if (report.interrupted) {
       lines.push('  Resume with:       --resume');
     }
     if (archiveSitemapFile) lines.push(`  Archive sitemap:   ${archiveSitemapFile}`);
+    if (manifestFile) lines.push(`  Asset manifest:    ${manifestFile}`);
     if (reportFile) lines.push(`  Report:            ${reportFile}`);
     lines.push('');
     return lines.join('\n');

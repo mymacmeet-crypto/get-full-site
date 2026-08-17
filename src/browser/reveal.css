@@ -1,0 +1,137 @@
+/*
+ * Reveal stylesheet - inserted into every frame after it loads, and therefore
+ * saved inside the archived file.
+ *
+ * That last part is the point. Blocking scripts is what makes an archived page
+ * safe to reopen, but it also means the site's reveal JavaScript never runs
+ * again offline. Without these rules, CSS such as `[data-aos] { opacity: 0 }`
+ * would re-hide the very text src/browser/reveal.js worked to bring in.
+ *
+ * WHY `!important` IS SAFE HERE
+ * An author `!important` declaration beats an inline `style="opacity:0"`, which
+ * is how GSAP, Framer Motion and ScrollReveal hide their targets - so these
+ * rules reach the cases a normal stylesheet could not.
+ *
+ * WHY THIS CANNOT UNHIDE REAL UI
+ * Closed modals, collapsed dropdowns and inactive tab panels are hidden with
+ * `display: none` on a container. `display` is never overridden below, and no
+ * declaration on a descendant can bring back a `display: none` ancestor, so
+ * that UI stays hidden exactly as the site intended.
+ *
+ * `visibility` is the one inherited property a descendant *can* override, so it
+ * is only reset for the narrow, library-specific selectors that set it on the
+ * animated element itself - never for the broad class-name heuristics further
+ * down. Same reasoning for `transform`.
+ */
+
+/* --------------------------------------------------------------------------
+ * Layer 1 - named libraries. High confidence: these selectors exist only
+ * because an animation is attached to the element, so every property the
+ * library uses to hide it is reset.
+ * -------------------------------------------------------------------------- */
+
+/* AOS (Animate On Scroll) */
+[data-aos],
+[data-aos].aos-animate,
+/* ScrollReveal */
+[data-sr],
+[data-sr-id],
+.sr,
+/* WOW.js + Animate.css */
+.wow,
+.animated,
+.animate__animated,
+/* Elementor */
+.elementor-invisible,
+.elementor-widget.elementor-invisible,
+/* WPBakery / Visual Composer */
+.wpb_animate_when_almost_visible,
+/* Framer Motion */
+[data-framer-appear-id],
+/* Locomotive Scroll */
+[data-scroll]:not(.is-inview),
+/* Rellax / Lax / common data-attribute conventions */
+[data-animate],
+[data-animation],
+[data-scroll-reveal] {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  translate: none !important;
+  scale: none !important;
+  rotate: none !important;
+  filter: none !important;
+  clip-path: none !important;
+  animation-play-state: running !important;
+  animation-fill-mode: both !important;
+  transition: none !important;
+}
+
+/* --------------------------------------------------------------------------
+ * Layer 2 - class-name conventions. Hand-rolled reveal code names its classes
+ * from a small, remarkably stable vocabulary. These matches are likely but not
+ * certain, so only `opacity` is forced: it cannot resurrect a `display: none`
+ * or `visibility: hidden` ancestor, which keeps a false positive harmless.
+ * -------------------------------------------------------------------------- */
+
+.reveal,
+.js-reveal,
+.scroll-animate,
+.animate-on-scroll,
+.aos-init,
+[class*="fade-in"],
+[class*="fadeIn"],
+[class*="fade-up"],
+[class*="fade-down"],
+[class*="fade-left"],
+[class*="fade-right"],
+[class*="slide-in"],
+[class*="slideIn"],
+[class*="slide-up"],
+[class*="zoom-in"],
+[class*="zoomIn"],
+[class*="animate-on"],
+[class*="reveal-"],
+[class*="-reveal"] {
+  opacity: 1 !important;
+  animation-fill-mode: both !important;
+}
+
+/* --------------------------------------------------------------------------
+ * Layer 3 - motion itself. A saved page is a still image of a moment; an
+ * animation mid-flight only ever renders as a half-finished frame. Collapsing
+ * every duration to zero pins each animation on its end state.
+ *
+ * Restricted to the elements above rather than applied globally, so a site's
+ * decorative loops (spinners, marquees, gradient shifts) are left intact.
+ * -------------------------------------------------------------------------- */
+
+[data-aos],
+[data-sr],
+[data-sr-id],
+.sr,
+.wow,
+.animated,
+.animate__animated,
+.elementor-invisible,
+.wpb_animate_when_almost_visible,
+[data-framer-appear-id],
+.reveal,
+.js-reveal,
+.scroll-animate,
+.animate-on-scroll {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+/* --------------------------------------------------------------------------
+ * Layer 4 - elements this run's reveal pass forced open. reveal.js writes the
+ * inline styles; this rule is the belt to that braces, covering the case where
+ * a site's own `!important` rule would otherwise win back.
+ * -------------------------------------------------------------------------- */
+
+[data-web-archiver-revealed] [style*="opacity"] {
+  animation-fill-mode: both !important;
+}

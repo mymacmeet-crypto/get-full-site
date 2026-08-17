@@ -18,7 +18,8 @@ jobs:
 
     steps:
       # The capture engine is vendored in the repo, so a plain checkout has
-      # everything; the tests make no network calls and launch no browser.
+      # everything; the tests launch no browser and reach nothing outside the
+      # runner - the download tests bind a throwaway loopback server.
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4

@@ -146,6 +146,15 @@ function emitShow(crawl) {
     delay: o.delayMs ?? 500,
     timeout: o.timeoutMs ?? 30000,
     idle: o.deferredImagesMaxIdleMs ?? 500,
+    wait: o.waitAfterLoadMs ?? 0,
+    // Linked files and capture fidelity. A crawl saved before these existed
+    // reports the current defaults, which is what a resume of it would use.
+    assets: o.assetMode === 'off' ? 'none' : (o.assetGroups || ['documents']).join(','),
+    assetDomains: o.assetMode && o.assetMode !== 'off' ? o.assetMode : 'linked',
+    maxAssets: o.maxAssets ?? 1000,
+    maxAssetSize: Math.round((o.maxAssetBytes ?? 100 * 1024 * 1024) / (1024 * 1024)),
+    rewriteLinks: o.rewriteLinks === false ? 0 : 1,
+    revealAnimations: o.revealAnimations === false ? 0 : 1,
   };
 
   for (const [key, value] of Object.entries(fields)) {
@@ -178,6 +187,23 @@ function emitArgs(crawl) {
   if (o.deferredImagesMaxIdleMs != null) {
     args.push('--deferred-images-idle', String(o.deferredImagesMaxIdleMs));
   }
+  if (o.waitAfterLoadMs) args.push('--wait', String(o.waitAfterLoadMs));
+
+  // Which files a crawl takes is a property of that crawl: resuming with a
+  // different selection would leave one archive holding two different answers.
+  if (o.assetMode === 'off') {
+    args.push('--no-assets');
+  } else if (o.assetMode) {
+    if (o.assetGroups && o.assetGroups.length) args.push('--assets', o.assetGroups.join(','));
+    args.push('--asset-domains', o.assetMode);
+    if (o.maxAssets != null) args.push('--max-assets', String(o.maxAssets));
+    if (o.maxAssetBytes != null) {
+      args.push('--max-asset-size', String(Math.round(o.maxAssetBytes / (1024 * 1024))));
+    }
+    if (o.rewriteLinks === false) args.push('--no-rewrite-links');
+  }
+  if (o.revealAnimations === false) args.push('--no-reveal-animations');
+  if (o.removeHiddenElements === true && o.revealAnimations !== false) args.push('--remove-hidden');
 
   for (const arg of args) process.stdout.write(`${arg}\n`);
 }

@@ -35,7 +35,7 @@ class CrawlState {
     }
   }
 
-  save({ startUrl, queue, stats, processedCount }) {
+  save({ startUrl, queue, stats, processedCount, assets }) {
     const payload = JSON.stringify(
       {
         version: STATE_VERSION,
@@ -44,6 +44,9 @@ class CrawlState {
         queue: queue.toJSON(),
         stats,
         processedCount,
+        // What the asset pipeline has already fetched, so a resume neither
+        // re-downloads those files nor renames them.
+        assets: assets || null,
       },
       null,
       2

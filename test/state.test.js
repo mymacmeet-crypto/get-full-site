@@ -37,7 +37,9 @@ test('save/load round-trips the crawl state', () => {
   const loaded = state.load('https://example.com/');
   assert.equal(loaded.startUrl, 'https://example.com/');
   assert.equal(loaded.processedCount, 7);
-  assert.deepEqual(loaded.queue.pending, [{ url: 'https://example.com/a', depth: 1 }]);
+  assert.deepEqual(loaded.queue.pending, [
+    { url: 'https://example.com/a', depth: 1, referrer: null },
+  ]);
   assert.deepEqual(loaded.stats.pages[0].file, 'raw-html/index.html');
   assert.ok(loaded.savedAt, 'savedAt is stamped');
 });

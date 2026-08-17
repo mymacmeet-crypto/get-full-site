@@ -22,9 +22,21 @@ test('FIFO order with depth preserved', () => {
   const q = new CrawlQueue();
   q.add('https://example.com/a', 0);
   q.add('https://example.com/b', 1);
-  assert.deepEqual(q.next(), { url: 'https://example.com/a', depth: 0 });
-  assert.deepEqual(q.next(), { url: 'https://example.com/b', depth: 1 });
+  assert.deepEqual(q.next(), { url: 'https://example.com/a', depth: 0, referrer: null });
+  assert.deepEqual(q.next(), { url: 'https://example.com/b', depth: 1, referrer: null });
   assert.equal(q.next(), undefined);
+});
+
+test('the referring page travels with a queued URL', () => {
+  // A URL that turns out to be a file rather than a page only reveals that in
+  // its response headers, by which point the link it came from is long gone.
+  const q = new CrawlQueue();
+  q.add('https://example.com/download', 1, 'https://example.com/library');
+  assert.deepEqual(q.next(), {
+    url: 'https://example.com/download',
+    depth: 1,
+    referrer: 'https://example.com/library',
+  });
 });
 
 test('serialization round-trips the full state', () => {
@@ -36,7 +48,11 @@ test('serialization round-trips the full state', () => {
 
   const restored = CrawlQueue.fromJSON(JSON.parse(JSON.stringify(q.toJSON())));
   assert.equal(restored.pendingCount, 1);
-  assert.deepEqual(restored.next(), { url: 'https://example.com/b', depth: 2 });
+  assert.deepEqual(restored.next(), {
+    url: 'https://example.com/b',
+    depth: 2,
+    referrer: null,
+  });
   assert.equal(restored.hasVisited('https://example.com/a'), true);
   assert.equal(restored.add('https://example.com/a', 0), false);
 });

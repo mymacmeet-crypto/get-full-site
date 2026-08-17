@@ -101,7 +101,10 @@ async function initialize(options) {
 
 async function capture(urls, options) {
 	let newTasks;
-	const taskUrls = tasks.map(task => task.url);
+	// web-archiver: a Set rather than an array. `tasks` holds every task of the
+	// whole run, so the linear `includes` below made each batch cost
+	// O(batch x run) - noticeable once a crawl passes a few hundred pages.
+	const taskUrls = new Set(tasks.map(task => task.url));
 	newTasks = await Promise.all(urls.map(value => {
 		let url, taskOptions;
 		if (Array.isArray(value)) {
@@ -113,7 +116,7 @@ async function capture(urls, options) {
 		}
 		return createTask(url, taskOptions);
 	}));
-	newTasks = newTasks.filter(task => task && !taskUrls.includes(task.url));
+	newTasks = newTasks.filter(task => task && !taskUrls.has(task.url));
 	if (newTasks.length) {
 		tasks = tasks.concat(newTasks);
 		await saveTasks();
@@ -122,7 +125,9 @@ async function capture(urls, options) {
 }
 
 async function finish(options) {
-	const promiseTasks = tasks.map(task => task.promise);
+	// web-archiver: finished tasks release their promise (see runNextTask), so
+	// only the ones still in flight have one left to wait on.
+	const promiseTasks = tasks.map(task => task.promise).filter(Boolean);
 	await Promise.all(promiseTasks);
 	if (options.crawlReplaceURLs && !options.compressContent) {
 		for (const task of tasks) {
@@ -183,6 +188,15 @@ async function runNextTask() {
 				tasks.splice(tasks.length, 0, ...newTasks);
 			}
 		}
+		// web-archiver: a resolved task.promise keeps its pageData alive, and
+		// pageData holds the entire captured document - every image, font and
+		// stylesheet already inlined as base64. `tasks` is never pruned, so
+		// without this every page captured stays in memory for the whole run
+		// and a few hundred pages is enough to exhaust the heap. The filename
+		// is kept; --crawl-replace-urls is the only reader and that is all it
+		// needs.
+		task.promise = undefined;
+		task.options = undefined;
 		await saveTasks();
 		await runTasks();
 	}

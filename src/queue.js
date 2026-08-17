@@ -16,11 +16,18 @@ class CrawlQueue {
     this.visited = new Set();
   }
 
-  /** Enqueue a URL unless it is already known. Returns true when added. */
-  add(url, depth) {
+  /**
+   * Enqueue a URL unless it is already known. Returns true when added.
+   *
+   * `referrer` is the page the link was found on. It is carried so that a URL
+   * which turns out to be a file rather than a page - only its response
+   * headers can say - still knows which page linked it, both for the asset
+   * scope rule and for the manifest's record of where a file came from.
+   */
+  add(url, depth, referrer = null) {
     if (this.known.has(url) || this.visited.has(url)) return false;
     this.known.add(url);
-    this.pending.push({ url, depth });
+    this.pending.push({ url, depth, referrer });
     return true;
   }
 

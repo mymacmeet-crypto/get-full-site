@@ -60,6 +60,7 @@ async function fetchPage(url, options) {
       // Redirect handling when following is disabled: report, don't follow.
       if (!followRedirects && response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location');
+        discard(response);
         return {
           ok: false,
           status: response.status,
@@ -76,6 +77,7 @@ async function fetchPage(url, options) {
       if (RETRYABLE_STATUS.has(response.status) && attempt <= maxRetries) {
         retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
         lastError = `HTTP ${response.status}`;
+        discard(response);
         await backoff(attempt, retryDelayMs, retryAfterMs, onRetry, url, lastError);
         continue;
       }
@@ -85,6 +87,7 @@ async function fetchPage(url, options) {
       const finalUrl = normalizeUrl(response.url) || url;
 
       if (!response.ok) {
+        discard(response);
         return {
           ok: false,
           status: response.status,
@@ -96,6 +99,12 @@ async function fetchPage(url, options) {
           attempts: attempt,
         };
       }
+
+      // A non-HTML body is never read here. Discovery only needs the status
+      // and content type; the bytes, if they turn out to be worth having, are
+      // the asset downloader's job. Leaving the body unread would pin the
+      // connection open until the response is collected.
+      if (!isHtml) discard(response);
 
       return {
         ok: true,
@@ -128,6 +137,11 @@ async function fetchPage(url, options) {
     error: lastError,
     attempts: maxRetries + 1,
   };
+}
+
+/** Release a response whose body this crawl will never read. */
+function discard(response) {
+  if (response.body && !response.bodyUsed) response.body.cancel().catch(() => {});
 }
 
 async function backoff(attempt, retryDelayMs, retryAfterMs, onRetry, url, reason) {

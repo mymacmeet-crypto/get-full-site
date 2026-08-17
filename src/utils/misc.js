@@ -21,4 +21,38 @@ function formatDuration(ms) {
   return `${h}h ${m % 60}m ${rs}s`;
 }
 
-module.exports = { sleep, shortHash, formatDuration };
+/** Format a byte count as "12.3 MB". */
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${unit === 0 ? value : value.toFixed(1)} ${units[unit]}`;
+}
+
+/**
+ * Run an async mapper over items, at most `limit` in flight.
+ *
+ * A limit that is not a positive integer falls back to 1 rather than
+ * producing an empty runner list: silently doing nothing at all is the worst
+ * possible reading of "how many at a time?".
+ */
+async function mapWithConcurrency(items, limit, mapper) {
+  const parallel = Number.isFinite(limit) && limit >= 1 ? Math.floor(limit) : 1;
+  const results = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(parallel, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+module.exports = { sleep, shortHash, formatDuration, formatBytes, mapWithConcurrency };

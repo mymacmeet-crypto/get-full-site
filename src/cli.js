@@ -15,8 +15,9 @@ function createProgram() {
     .name('web-archiver')
     .description(
       'Crawl one domain and archive the selected pages as standalone HTML files.\n' +
-        'Each site gets <output>/<host>/ with exactly two folders: report/ and raw-html/.\n' +
-        'raw-html/ is flat - one file per page, no nested directories.'
+        'Each site gets <output>/<host>/ with report/, raw-html/ and, once the crawl\n' +
+        'downloads a linked file, assets/. raw-html/ and assets/ are flat - one file\n' +
+        'per page or download, no nested directories.'
     )
     .version(pkg.version)
     .argument('<url>', 'start URL of the site to archive')
@@ -45,8 +46,71 @@ function createProgram() {
       '--deferred-images-idle <ms>',
       'how long the browser waits for lazy-loaded images per page (engine default is 1500)'
     )
+    .option(
+      '--wait <ms>',
+      'extra settling time after a page loads, before it is captured - raise it ' +
+        'for sites that render content with JavaScript (not the same as --delay)'
+    )
     .option('--no-follow-redirects', 'do not follow HTTP redirects')
-    .option('--overwrite', 'overwrite files that already exist in raw-html/')
+
+    // ---- Linked files ------------------------------------------------------
+    .option(
+      '--assets <list>',
+      'file types to download alongside pages: any of documents, archives, ' +
+        'media, code, plus bare extensions - or "all" / "none"',
+      'documents'
+    )
+    .option('--no-assets', 'do not download linked files at all')
+    .option('--asset-ext <ext>', 'download this extension too (repeatable)', collect, [])
+    .addOption(
+      new Option(
+        '--asset-domains <mode>',
+        'which hosts linked files may come from: "same" (crawled host only), ' +
+          '"linked" (also other hosts a crawled page links directly, e.g. a CDN), ' +
+          'or "any"'
+      )
+        .choices(['same', 'linked', 'any'])
+        .default('linked')
+    )
+    .option('--max-assets <n>', 'how many linked files to download', '1000')
+    .option('--max-asset-size <mb>', 'skip any linked file larger than this', '100')
+    .option('--asset-concurrency <n>', 'parallel asset downloads', '3')
+    .option(
+      '--no-rewrite-links',
+      'leave links in the saved HTML pointing at the live site instead of the ' +
+        'downloaded copies in assets/'
+    )
+    .option(
+      '--no-original-href',
+      'when rewriting links, do not keep the live URL on data-original-href'
+    )
+
+    // ---- Capture fidelity --------------------------------------------------
+    .option(
+      '--no-reveal-animations',
+      'do not scroll pages before capturing them - text that animates in on ' +
+        'scroll will be missing from the saved file'
+    )
+    .option('--reveal-scroll-ms <ms>', 'time budget for the pre-capture scroll, per page', '4000')
+    .option(
+      '--remove-hidden',
+      'let the capture engine delete elements that are invisible at capture ' +
+        'time (smaller files, but risks losing animated content)'
+    )
+    .option(
+      '--browser-script <file>',
+      'extra script injected into every page before it loads (repeatable)',
+      collect,
+      []
+    )
+    .option(
+      '--browser-stylesheet <file>',
+      'extra stylesheet injected into every page after it loads (repeatable)',
+      collect,
+      []
+    )
+
+    .option('--overwrite', 'overwrite files that already exist in raw-html/ and assets/')
     .option('--resume', 'resume an interrupted crawl of the same start URL')
     .option('--respect-robots', 'honor robots.txt disallow rules (off by default)')
     .option('--dry-run', 'crawl and report without archiving any pages')

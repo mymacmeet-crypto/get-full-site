@@ -2,7 +2,10 @@
 
 Give it one URL. It crawls that domain and saves the pages you asked for as
 standalone HTML files — each page a single file with its CSS, images and fonts
-inlined, so it opens offline with nothing missing.
+inlined, so it opens offline with nothing missing. It scrolls each page before
+saving it, so text that animates into view is in the file rather than left
+invisible, and it downloads the documents a page links to, so the PDFs open
+too.
 
 It merges two halves that used to be separate projects: a crawler that decides
 *which* pages to take, and a capture engine that produces the archive
@@ -12,7 +15,7 @@ whole crawl instead of one browser per page.
 
 ## Output layout
 
-One folder per input domain, holding exactly two folders:
+One folder per input domain:
 
 ```
 archive/
@@ -20,6 +23,7 @@ archive/
     report/
       crawl-report.json      every page, skip reason and failure
       sitemap.xml            archived URL -> which flat file holds it
+      assets-manifest.json   every downloaded file, its source pages and hash
       capture-errors.log     browser-side failures, when any
       sitemaps/              copies of the site's own sitemap.xml
       .crawl-state.json      resume state (removed on a clean finish)
@@ -28,10 +32,13 @@ archive/
       about.html
       domains-root.html
       domains-root-db.html
+    assets/                  only when the crawl downloaded something
+      docs-annual-report.pdf
+      files-price-list.xlsx
 ```
 
-`raw-html/` is **flat by design** — no subfolders, ever. A page's path becomes
-part of its filename:
+`raw-html/` and `assets/` are **flat by design** — no subfolders, ever. A
+page's path becomes part of its filename:
 
 | URL | File |
 |---|---|
@@ -191,11 +198,36 @@ set.
 | `--delay <ms>` | `500` | Minimum spacing between requests to the site |
 | `-t, --timeout <ms>` | `30000` | Per-request and per-page timeout |
 | `--deferred-images-idle <ms>` | `500` | Lazy-image wait per page (see below) |
-| `--overwrite` | off | Re-archive pages whose file already exists |
+| `--wait <ms>` | `600` | Settle time after load, before capture (see below) |
+| `--overwrite` | off | Re-archive pages and files that already exist |
 | `--resume` | off | Continue a saved crawl of the same start URL |
 | `--respect-robots` | off | Honor robots.txt disallow rules |
 | `-o, --output <dir>` | `./archive` | Base output directory |
 | `-v, --verbose` / `-q, --quiet` | — | Logging level |
+
+**Linked files** (see [Downloading linked files](#downloading-linked-files)):
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--assets <list>` | `documents` | Types to download: `documents`, `archives`, `media`, `code`, bare extensions, `all`, `none` |
+| `--no-assets` | — | Download nothing but pages |
+| `--asset-ext <ext>` | — | Add one extension (repeatable) |
+| `--asset-domains <mode>` | `linked` | `same`, `linked` (also CDN-hosted files a page links directly) or `any` |
+| `--max-assets <n>` | `1000` | Ceiling on files downloaded |
+| `--max-asset-size <mb>` | `100` | Skip anything larger |
+| `--asset-concurrency <n>` | `3` | Parallel downloads |
+| `--no-rewrite-links` | — | Leave saved pages pointing at the live site |
+| `--no-original-href` | — | Drop the `data-original-href` provenance attribute |
+
+**Capture fidelity** (see [Text that animates in](#text-that-animates-in)):
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--no-reveal-animations` | — | Do not scroll pages before capturing them |
+| `--reveal-scroll-ms <ms>` | `4000` | Scroll budget per page |
+| `--remove-hidden` | off | Let the engine delete elements invisible at capture time |
+| `--browser-script <file>` | — | Extra script injected before load (repeatable) |
+| `--browser-stylesheet <file>` | — | Extra stylesheet injected after load (repeatable) |
 
 Exit codes: `0` success, `2` nothing archived but failures occurred, `130`
 interrupted (resumable), `1` startup error.
@@ -229,6 +261,122 @@ Archiving 4 Wikipedia pages, same machine and network:
 The per-page process + Chrome launch costs ~1.4s, and pages cannot overlap when
 each one owns its browser. Both problems disappear at once.
 
+### Waiting for JavaScript-rendered pages
+
+If a page builds its content with JavaScript after load, the capture can catch
+the skeleton instead of the page. `--wait <ms>` pauses after the page settles
+and before the capture runs:
+
+```bash
+node bin/archive.js https://example.com --wait 2500
+```
+
+It defaults to 600ms — the slack the reveal pass below needs after the page
+settles — and to `0` when that pass is off. The cost is milder than it looks:
+tabs run in parallel, so a wait is paid roughly once per batch rather than once
+per page.
+
+There are now three time knobs and they do different jobs:
+
+| Flag | Waits for | When to raise it |
+|---|---|---|
+| `--delay <ms>` | Politeness between requests **to the site** | You are being rate-limited |
+| `--deferred-images-idle <ms>` | Lazy-loaded **images** to settle | Image-heavy or infinite-scroll pages |
+| `--wait <ms>` | Anything else the **page's JavaScript** renders | SPA-style sites, late-loading widgets |
+
+If a page archives as an empty shell or a loading spinner, `--wait` is the one
+you want.
+
+### Text that animates in
+
+A great many sites fade their text in as you scroll — AOS, WOW.js,
+ScrollReveal, Elementor, GSAP, Framer Motion, or a few lines of
+`IntersectionObserver`. Until that fires, the text sits at `opacity: 0`. A
+headless capture never scrolls, so it never fires, and the text was lost two
+different ways:
+
+- the capture engine deletes elements that are invisible when the page is
+  saved, so the text was **dropped from the file entirely**; or
+- the text survived but its reveal class never arrived, so the saved page
+  **opens with it still invisible**.
+
+Every page is now scrolled top to bottom before it is captured. Three layers,
+weakest assumption first:
+
+1. **Scroll.** The site's own observers and scroll handlers fire and reveal the
+   content themselves, exactly as they would for a reader. This is the honest
+   fix and it needs no guesswork about the site.
+2. **Finish animations.** Any CSS animation or transition still mid-flight is
+   jumped to its end state, so nothing is captured half-transparent. (Infinite
+   animations — spinners, marquees — cannot be finished and are left alone.)
+3. **Force what is left.** Anything still invisible *while occupying layout
+   space* is a reveal that never fired, and is made visible.
+
+That third rule is what keeps the pass safe. Closed modals, collapsed
+dropdowns and inactive tab panels are hidden with `display: none`, which
+occupies no space — so they are never touched, and stay hidden in the archive
+exactly as the site intended. The engine's element-deleting is also turned off
+while the pass is on, since the pass is the better judge of what is genuinely
+hidden; that costs some file size.
+
+The scroll starts at `DOMContentLoaded`, so most of it overlaps the tail of
+page load rather than adding to it. `--reveal-scroll-ms` caps it (default
+4000ms) so an infinite-scroll feed cannot be chased forever.
+
+Turn the whole thing off with `--no-reveal-animations`. The browser-side
+sources are plain, readable files in `src/browser/` — `reveal.js` and
+`reveal.css` — and `--browser-script` / `--browser-stylesheet` inject your own
+alongside them.
+
+Pages the pass changed carry `data-web-archiver-revealed="<n>"` on `<html>`,
+so an archive says how much of it was forced rather than natural.
+
+### Downloading linked files
+
+A page's own images, CSS and fonts are inlined into the standalone HTML. A
+**link** to a file is different: archiving the page does not fetch what is
+behind the link, so a saved page's "Download the report (PDF)" used to lead
+back to the live web — and to nothing at all once the site changed.
+
+Files linked from crawled pages are now downloaded into `assets/`, and the
+links in the saved pages are repointed at those local copies:
+
+```html
+<a href="../assets/docs-annual-report.pdf"
+   data-original-href="https://example.com/docs/annual-report.pdf">Download</a>
+```
+
+The live URL is kept on `data-original-href`, so nothing about the original
+page is lost. `--no-original-href` drops it; `--no-rewrite-links` leaves the
+links pointing at the live site and just collects the files.
+
+Defaults and behaviour:
+
+- **`documents` only** — PDF, Word, Excel, PowerPoint, OpenDocument, CSV,
+  ePub and friends. Add groups or single types with `--assets media` or
+  `--asset-ext dwg`; take everything with `--assets all`.
+- **Extension-less URLs are still caught.** `/download?id=42` gives nothing
+  away until its response headers arrive; when they say `application/pdf`, the
+  file is taken and saved with the right extension.
+- **Embedded files too** — a PDF shown in an `<iframe>` or `<object>` viewer is
+  downloaded even though nothing links to it.
+- **Off-host files are taken when a crawled page links them directly**
+  (`--asset-domains linked`), so a PDF on a CDN or an S3 bucket is not missed.
+  `same` restricts to the crawled host; `any` removes the restriction.
+- **The same file under two URLs is stored once.** Sites routinely link both an
+  `http://` and an `https://` form of one path; both URLs still rewrite to a
+  working local link, but only one copy is kept. On one real crawl that was 8
+  files instead of 10, and 11.4 MB instead of 15.5 MB.
+- **Files do not consume `--max-pages`.** They have their own `--max-assets`
+  budget, and they ignore `--depth`: a PDF is the end of a path, not a step
+  along one.
+- **`--include` does not apply to them,** but `--exclude` does. A PDF linked
+  from an included page is worth having even though its own URL sits elsewhere;
+  `--exclude` means "never touch this".
+
+`report/assets-manifest.json` records every file — its URL, local name, size,
+SHA-256, and which pages linked it.
+
 ### The lazy-image default
 
 The engine waits 1500ms per page for lazy-loaded images. Measured on one
@@ -258,6 +406,13 @@ the right URL in the report, and a failed page returns its `--max-pages` slot so
 the budget counts pages you actually got.
 
 One bad page never stops a crawl: it is recorded and the wave moves on.
+
+The same holds for linked files. A download that 404s, times out or exceeds
+`--max-asset-size` is named in the report and the queue carries on; a partial
+download is written to a temporary name and never appears under its real one,
+so an interrupted run cannot leave a truncated file for `--resume` to mistake
+for a complete one. A rewrite failure cannot fail a page either — the page is
+already safely on disk by then, so only the link localisation is lost.
 
 ## Licensing
 
@@ -293,5 +448,7 @@ npm test
 ```
 
 Unit tests cover URL normalization, scope rules, the crawl frontier, sitemap
-parsing, link extraction and the flat-filename scheme. They make no network
-calls and launch no browser.
+parsing, link and embed extraction, the flat-filename scheme, asset
+classification and queueing, and the link rewriter. They launch no browser and
+reach nothing outside the machine — the few that exercise a real download run
+against a throwaway `http.createServer` on a loopback port.

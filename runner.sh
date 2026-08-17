@@ -370,6 +370,19 @@ wizard() {
   ARGS=("$URL" --max-pages "$PAGES" --depth "$DEPTH" --output "$OUTPUT")
   add_flag --dry-run "$DRY_RUN"
 
+  section "Linked files"
+  printf '  %sPDFs and spreadsheets are linked, not embedded, so archiving a page%s\n' "$GREY" "$R"
+  printf '  %sdoes not fetch them. Downloaded files land in assets/, and the saved%s\n' "$GREY" "$R"
+  printf '  %spages are repointed at them so the archive works offline.%s\n\n' "$GREY" "$R"
+  local take_files
+  ask_yn take_files "Download linked files (PDFs, spreadsheets, ...)?" y
+  if [[ $take_files == yes ]]; then
+    record "Files" "documents"
+  else
+    ARGS+=(--no-assets)
+    record "Files" "none"
+  fi
+
   section "Advanced"
   printf '  %sfilters, tuning, resume - defaults are fine for most sites%s\n\n' "$GREY" "$R"
   local advanced
@@ -381,8 +394,9 @@ wizard() {
 
 # On a resume every prompt starts on what the saved crawl used (via PREV).
 wizard_advanced() {
-  local include exclude sitemap workers concurrency delay timeout idle
+  local include exclude sitemap workers concurrency delay timeout idle wait
   local resume overwrite robots all_domains verbose kind count
+  local assets asset_domains max_assets max_asset_size rewrite reveal reveal_ms
 
   printf '\n'
   # Only the first pattern can be offered as a default; say so rather than
@@ -407,20 +421,51 @@ wizard_advanced() {
   esac
 
   printf '\n'
+  # Blank keeps whatever the top-level "download linked files" answer set.
+  ask assets "File types to download (documents/archives/media/code/all/none, blank = keep)" "$(prior assets '')"
+  if [[ -n $assets ]]; then
+    ARGS+=(--assets "$assets")
+    record "Files" "$assets"
+  fi
+  if [[ $assets != none ]]; then
+    ask asset_domains "Take files from which hosts (same/linked/any)" "$(prior assetDomains linked)"
+    [[ -n $asset_domains ]] && ARGS+=(--asset-domains "$asset_domains")
+    ask_int max_assets      "Maximum files to download" "$(prior maxAssets 1000)" 1
+    ask_int max_asset_size  "Skip files larger than (MB)" "$(prior maxAssetSize 100)" 1
+    ARGS+=(--max-assets "$max_assets" --max-asset-size "$max_asset_size")
+    ask_yn rewrite "Repoint saved pages at the downloaded files?" y
+    [[ $rewrite == no ]] && ARGS+=(--no-rewrite-links)
+  fi
+
+  printf '\n'
   ask_int workers     "Parallel browser tabs per batch" "$(prior workers 4)" 1
   ask_int concurrency "Parallel discovery fetches" "$(prior concurrency 2)" 1
   ask_int delay       "Delay between requests (ms)" "$(prior delay 500)" 0
   ask_int timeout     "Per-request / per-page timeout (ms)" "$(prior timeout 30000)" 1000
   ask_int idle        "Lazy-image wait per page (ms; raise for image-heavy sites)" "$(prior idle 500)" 0
+  ask_int wait        "Settle time after load, before capture (ms; for JS-rendered sites)" "$(prior wait 600)" 0
   ARGS+=(--workers "$workers" --concurrency "$concurrency" --delay "$delay"
-         --timeout "$timeout" --deferred-images-idle "$idle")
-  record "Tuning" "${workers} tabs, ${concurrency} fetches, ${delay}ms delay, ${timeout}ms timeout, ${idle}ms lazy-image wait"
+         --timeout "$timeout" --deferred-images-idle "$idle" --wait "$wait")
+  record "Tuning" "${workers} tabs, ${concurrency} fetches, ${delay}ms delay, ${timeout}ms timeout, ${idle}ms lazy-image wait, ${wait}ms settle"
+
+  printf '\n'
+  # Text that fades in on scroll is invisible to a capture that never scrolls,
+  # so this is on unless it is explicitly turned off.
+  ask_yn reveal "Scroll pages before capturing (keeps text that animates in)?" y
+  if [[ $reveal == no ]]; then
+    ARGS+=(--no-reveal-animations)
+    record "Reveal" "off"
+  else
+    ask_int reveal_ms "Scroll budget per page (ms)" "$(prior revealScrollMs 4000)" 0
+    ARGS+=(--reveal-scroll-ms "$reveal_ms")
+    record "Reveal" "${reveal_ms}ms scroll"
+  fi
 
   printf '\n'
   # --resume is already set by the resume flow, so it is not asked there.
   resume=no
   [[ $IS_RESUME == yes ]] || ask_yn resume "Resume a previous interrupted crawl?" n
-  ask_yn overwrite   "Overwrite pages already in raw-html/?" n
+  ask_yn overwrite   "Overwrite files already in raw-html/ and assets/?" n
   ask_yn robots      "Respect robots.txt disallow rules?" "$(prior_yn respectRobots)"
   ask_yn all_domains "Follow links to external domains?" "$(prior_yn allDomains)"
   ask_yn verbose     "Verbose logging?" n
@@ -504,6 +549,8 @@ execute() {
       local host=${URL#*://}; host=${host%%/*}
       local site="${OUTPUT:-./archive}/${host}"
       printf '  %sPages%s   %s/raw-html/\n' "$GREY" "$R" "$site"
+      # assets/ only exists when the crawl actually downloaded something.
+      [[ -d "$site/assets" ]] && printf '  %sFiles%s   %s/assets/\n' "$GREY" "$R" "$site"
       printf '  %sReport%s  %s/report/crawl-report.json\n' "$GREY" "$R" "$site"
       ;;
     2)
