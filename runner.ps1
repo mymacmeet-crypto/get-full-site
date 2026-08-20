@@ -360,7 +360,12 @@ function Invoke-Wizard {
     Write-Host "  $($C.Grey)does not fetch them. Downloaded files land in assets/, and the saved$($C.R)"
     Write-Host "  $($C.Grey)pages are repointed at them so the archive works offline.$($C.R)"
     Write-Host ''
-    if (Read-YesNo 'Download linked files (PDFs, spreadsheets, ...)?' 'y') {
+    if (Read-YesNo 'Only survey what file types the site holds (fast, saves nothing)?' 'n') {
+        Add-Arg '--survey'
+        $script:Summary['Mode'] = 'survey'
+        $script:Summary['Files'] = 'survey only'
+    }
+    elseif (Read-YesNo 'Download linked files (PDFs, spreadsheets, ...)?' 'y') {
         $script:Summary['Files'] = 'documents'
     } else {
         Add-Arg '--no-assets'

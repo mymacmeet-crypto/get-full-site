@@ -11,11 +11,17 @@ const { CrawlReport } = require('./report');
 const { CrawlState } = require('./state');
 const { Archiver } = require('./archiver');
 const { AssetDownloader } = require('./assets');
+const { AssetInventory } = require('./inventory');
 const { rewriteFile } = require('./rewrite');
 const { fetchPage } = require('./fetcher');
 const { extractPageData } = require('./extractor');
 const { loadSitemapEntries, sortByPriority } = require('./sitemap');
-const { normalizeUrl, checkScope, isSameDomain } = require('./utils/url');
+const {
+  normalizeUrl,
+  checkScope,
+  isSameDomain,
+  groupForContentType,
+} = require('./utils/url');
 const { siteDir, reportDir, rawHtmlDir, assetsDir, FlatNames } = require('./utils/paths');
 const { formatDuration, mapWithConcurrency } = require('./utils/misc');
 
@@ -69,6 +75,11 @@ class Crawler {
           logger: this.logger,
         })
       : null;
+    // Counts what the site holds, which is a different question from what the
+    // run is configured to take - and the only record of the types a crawl
+    // walked past. Runs even with downloads off, so `--assets none` is a
+    // survey: crawl, report every type present, fetch nothing.
+    this.inventory = new AssetInventory(this.startUrl);
     this.assets = new AssetDownloader({
       config: { ...config, startUrl: this.startUrl },
       logger: this.logger,
@@ -77,6 +88,7 @@ class Crawler {
       robots: this.robots,
       directory: this.assetsDirectory,
       reportDirectory: this.reportDirectory,
+      inventory: this.inventory,
     });
 
     this.scope = {
@@ -108,12 +120,20 @@ class Crawler {
 
     await this._initializeFrontier();
 
+    const verb = config.survey ? 'Surveying' : 'Archiving';
+    const mode = config.survey ? '' : config.dryRun ? ', DRY RUN' : '';
     logger.info(
-      `Archiving ${this.startUrl} -> ${this.siteDirectory} ` +
+      `${verb} ${this.startUrl} -> ${this.siteDirectory} ` +
         `(depth<=${config.maxDepth}, pages<=${config.maxPages}, ` +
-        `discovery=${config.concurrency}, tabs=${config.workers}, batch=${config.batchSize}, ` +
-        `delay=${config.delayMs}ms${config.dryRun ? ', DRY RUN' : ''})`
+        `discovery=${config.concurrency}${config.survey ? '' : `, tabs=${config.workers}`}, ` +
+        `batch=${config.batchSize}, delay=${config.delayMs}ms${mode})`
     );
+    if (config.survey) {
+      logger.info(
+        'Survey: reading each page for its links only - nothing is archived or ' +
+          'downloaded. Writing report/assets-inventory.json.'
+      );
+    }
     logger.info(
       this.assets.enabled
         ? `Linked files: ${config.assetGroups.join(', ')} ` +
@@ -273,10 +293,16 @@ class Crawler {
       // serving a PDF only reveals itself in the response headers. This is the
       // one place those are visible, so the asset pipeline gets a look before
       // the URL is written off.
+      // A URL with no extension only reveals its type here, so the inventory
+      // is told the extension the headers implied rather than one parsed from
+      // the path - otherwise /download?id=42 would never be counted at all.
+      const byType = groupForContentType(result.contentType);
+      if (byType) this.inventory.record(effectiveUrl, referrer, { extension: byType.extension });
       if (this.assets.enqueueByContentType(effectiveUrl, result.contentType, referrer)) {
         logger.debug(`linked file found by content type (${result.contentType}): ${url}`);
         return null;
       }
+      if (byType) this.inventory.markSkipped(effectiveUrl);
       report.recordSkipped(url, `non-html:${result.contentType || 'unknown'}`);
       logger.debug(`skip (non-HTML ${result.contentType}): ${url}`);
       return null;
@@ -301,7 +327,12 @@ class Crawler {
     this._enqueueLinks(links, depth, effectiveUrl);
     // Embedded files (an <iframe> or <object> holding a PDF viewer) are never
     // pages, so they only ever go to the asset pipeline.
-    for (const embed of embeds) this.assets.enqueue(embed, effectiveUrl);
+    for (const embed of embeds) {
+      const counted = this.inventory.record(embed, effectiveUrl);
+      if (!this.assets.enqueue(embed, effectiveUrl) && counted) {
+        this.inventory.markSkipped(embed);
+      }
+    }
 
     if (this.processedCount >= config.maxPages) {
       report.recordSkipped(url, 'page-budget-reached');
@@ -346,7 +377,14 @@ class Crawler {
    */
   _enqueueLinks(links, depth, sourceUrl) {
     for (const link of links) {
+      // Counted first, and unconditionally. Every branch below can drop the
+      // URL - wrong type, out of scope, past the depth limit - and each one
+      // would otherwise erase the fact that this file type exists on the site.
+      const counted = this.inventory.record(link, sourceUrl);
       if (this.assets.enqueue(link, sourceUrl)) continue;
+      // Reached only when the downloader declined it, so it is a type the run
+      // is not collecting.
+      if (counted) this.inventory.markSkipped(link);
 
       if (depth >= this.config.maxDepth) continue;
       if (this.queue.hasVisited(link) || this.queue.known.has(link)) continue;
@@ -504,6 +542,9 @@ class Crawler {
       // Without this a resume re-downloads every file the first run already
       // took, and hands out fresh names for them on top.
       this.assets.restore(previous.assets);
+      // Without this the tally would restart at zero and report a fraction of
+      // what the site holds.
+      this.inventory.restore(previous.inventory);
       this.logger.info(
         `Resuming crawl saved at ${previous.savedAt}: ` +
           `${this.queue.pendingCount} pending, ${this.queue.visited.size} visited, ` +
@@ -606,6 +647,7 @@ class Crawler {
         stats: this.report.statsSnapshot(),
         processedCount: this.processedCount,
         assets: this.assets.toJSON(),
+        inventory: this.inventory.toState(),
       });
     } catch (error) {
       this.report.recordError(`state save failed: ${error.message}`);
@@ -646,30 +688,64 @@ class Crawler {
       report.recordAssetSkipped(item.url, `asset-${cutoff}`);
     }
 
+    // Attached before build(), which snapshots it into the report.
+    report.assetInventory = this.inventory.toJSON();
+
     const builtReport = report.build(this.queue.discoveredCount);
-    let reportFile = null;
-    let archiveSitemapFile = null;
-    let manifestFile = null;
-    try {
-      reportFile = report.write(builtReport, this.siteDirectory);
-    } catch (error) {
-      logger.error(`Could not write report file: ${error.message}`);
-    }
-    try {
-      archiveSitemapFile = report.writeArchiveSitemap(builtReport, this.siteDirectory);
-    } catch (error) {
-      logger.error(`Could not write archive sitemap: ${error.message}`);
-    }
-    if (!this.config.dryRun) {
+
+    // Each output is written independently: one that fails must not take the
+    // others with it, since every one of them is a different reader's way in.
+    const written = {};
+    // A survey exists to answer one question, so it writes one file. The rest
+    // describe an archive, and a survey does not produce one.
+    const outputs = this.config.survey
+      ? [
+          [
+            'assetInventoryFile',
+            'asset inventory',
+            () => report.writeAssetInventory(builtReport, this.siteDirectory),
+          ],
+        ]
+      : [
+          ['reportFile', 'report file', () => report.write(builtReport, this.siteDirectory)],
+          [
+            'assetInventoryFile',
+            'asset inventory',
+            () => report.writeAssetInventory(builtReport, this.siteDirectory),
+          ],
+          [
+            'archiveSitemapFile',
+            'archive sitemap',
+            () => report.writeArchiveSitemap(builtReport, this.siteDirectory),
+          ],
+          [
+            'archiveIndexFile',
+            'archive index',
+            () => report.writeArchiveIndex(builtReport, this.siteDirectory),
+          ],
+          [
+            'assetListFile',
+            'file URL list',
+            () => report.writeAssetList(builtReport, this.siteDirectory),
+          ],
+          // The manifest comes from the downloader rather than the report, and
+          // a dry run has nothing on disk for it to describe.
+          [
+            'manifestFile',
+            'asset manifest',
+            () => (this.config.dryRun ? null : this.assets.save()),
+          ],
+        ];
+    for (const [key, label, write] of outputs) {
       try {
-        manifestFile = this.assets.save();
+        written[key] = write();
       } catch (error) {
-        logger.error(`Could not write the asset manifest: ${error.message}`);
+        written[key] = null;
+        logger.error(`Could not write the ${label}: ${error.message}`);
       }
     }
-    process.stdout.write(
-      report.summary(builtReport, { reportFile, archiveSitemapFile, manifestFile })
-    );
+
+    process.stdout.write(report.summary(builtReport, written));
     logger.debug(`Total wall time: ${formatDuration(Date.now() - startedAt)}`);
 
     return builtReport;

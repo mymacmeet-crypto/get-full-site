@@ -19,6 +19,14 @@ const DEFAULT_WAIT_WITH_REVEAL_MS = 600;
 
 const ASSET_MODES = new Set(['off', 'same', 'linked', 'any']);
 
+// --survey is a read-only sweep: it fetches each page once to read its links
+// and writes nothing but the asset inventory. Its cost is almost entirely the
+// politeness delay - on a 57-page crawl the default 500ms accounts for 96% of
+// the wall clock - so it lowers the delay and raises concurrency rather than
+// pretending the work is cheaper than it is. Explicit flags still win.
+const SURVEY_DELAY_MS = 100;
+const SURVEY_CONCURRENCY = 6;
+
 /** Compile CLI-provided pattern strings into RegExp, failing fast on typos. */
 function compilePatterns(patterns, flagName) {
   return (patterns || []).map((raw) => {
@@ -119,6 +127,10 @@ function buildConfig(startUrl, cliOptions) {
 
   const revealAnimations = cliOptions.revealAnimations !== false && env.REVEAL_ANIMATIONS !== '0';
 
+  // A survey never captures and never downloads, so it reuses the dry-run path
+  // through the page pipeline rather than adding a second way to skip work.
+  const survey = Boolean(cliOptions.survey);
+
   const config = {
     startUrl,
     outputFolder,
@@ -129,8 +141,18 @@ function buildConfig(startUrl, cliOptions) {
     includePatterns: compilePatterns(cliOptions.include, '--include'),
     excludePatterns: compilePatterns(cliOptions.exclude, '--exclude'),
 
-    delayMs: positiveInt(cliOptions.delay, '--delay'),
-    concurrency: positiveInt(cliOptions.concurrency, '--concurrency', { min: 1 }),
+    // commander reports its own default for an unset flag, so "did the user
+    // choose this?" is answered by comparing against that default rather than
+    // by checking for undefined.
+    delayMs: positiveInt(
+      survey && cliOptions.delay === '500' ? SURVEY_DELAY_MS : cliOptions.delay,
+      '--delay'
+    ),
+    concurrency: positiveInt(
+      survey && cliOptions.concurrency === '2' ? SURVEY_CONCURRENCY : cliOptions.concurrency,
+      '--concurrency',
+      { min: 1 }
+    ),
     // Parallel tabs inside the one shared browser.
     workers: positiveInt(cliOptions.workers, '--workers', { min: 1 }),
     // Pages discovered before each archive batch is handed to SingleFile.
@@ -146,7 +168,9 @@ function buildConfig(startUrl, cliOptions) {
     overwrite: Boolean(cliOptions.overwrite),
     resume: Boolean(cliOptions.resume),
     respectRobots: Boolean(cliOptions.respectRobots),
-    dryRun: Boolean(cliOptions.dryRun),
+    // A survey is a dry run that also suppresses the archive-oriented reports.
+    survey,
+    dryRun: Boolean(cliOptions.dryRun) || survey,
 
     userAgent: cliOptions.userAgent || env.USER_AGENT || DEFAULT_USER_AGENT,
     maxRetries: positiveInt(env.MAX_RETRIES ?? 3, 'MAX_RETRIES'),
@@ -229,4 +253,6 @@ module.exports = {
   DEFAULT_USER_AGENT,
   DEFAULT_DEFERRED_IMAGES_IDLE_MS,
   DEFAULT_WAIT_WITH_REVEAL_MS,
+  SURVEY_DELAY_MS,
+  SURVEY_CONCURRENCY,
 };

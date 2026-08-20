@@ -114,6 +114,13 @@ function createProgram() {
     .option('--resume', 'resume an interrupted crawl of the same start URL')
     .option('--respect-robots', 'honor robots.txt disallow rules (off by default)')
     .option('--dry-run', 'crawl and report without archiving any pages')
+    .option(
+      '--survey',
+      'find out what file types a site holds and nothing else: fetch each page ' +
+        'once for its links, archive nothing, download nothing, and write only ' +
+        'report/assets-inventory.json. Uses a lower --delay and higher ' +
+        '--concurrency than a normal crawl, since nothing is being saved'
+    )
     .option('-o, --output <dir>', 'base output directory (overrides OUTPUT_FOLDER from .env)')
     .option('--user-agent <ua>', 'User-Agent for discovery requests and the browser')
     .option('--report <file>', 'write the JSON report to this exact path')

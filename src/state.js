@@ -35,7 +35,7 @@ class CrawlState {
     }
   }
 
-  save({ startUrl, queue, stats, processedCount, assets }) {
+  save({ startUrl, queue, stats, processedCount, assets, inventory }) {
     const payload = JSON.stringify(
       {
         version: STATE_VERSION,
@@ -47,6 +47,9 @@ class CrawlState {
         // What the asset pipeline has already fetched, so a resume neither
         // re-downloads those files nor renames them.
         assets: assets || null,
+        // What file types the site holds, so a resumed crawl continues the
+        // tally instead of restarting it.
+        inventory: inventory || null,
       },
       null,
       2

@@ -374,7 +374,21 @@ wizard() {
   printf '  %sPDFs and spreadsheets are linked, not embedded, so archiving a page%s\n' "$GREY" "$R"
   printf '  %sdoes not fetch them. Downloaded files land in assets/, and the saved%s\n' "$GREY" "$R"
   printf '  %spages are repointed at them so the archive works offline.%s\n\n' "$GREY" "$R"
-  local take_files
+  local take_files survey_only
+  ask_yn survey_only "Only survey what file types the site holds (fast, saves nothing)?" n
+  if [[ $survey_only == yes ]]; then
+    ARGS+=(--survey)
+    record "Mode" "survey"
+    record "Files" "survey only"
+    section "Advanced"
+    printf '  %sfilters, tuning, resume - defaults are fine for most sites%s
+
+' "$GREY" "$R"
+    local adv
+    ask_yn adv "Configure advanced options?" n
+    [[ $adv == yes ]] && wizard_advanced
+    return 0
+  fi
   ask_yn take_files "Download linked files (PDFs, spreadsheets, ...)?" y
   if [[ $take_files == yes ]]; then
     record "Files" "documents"

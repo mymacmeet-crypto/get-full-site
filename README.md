@@ -22,7 +22,11 @@ archive/
   example.com/
     report/
       crawl-report.json      every page, skip reason and failure
-      sitemap.xml            archived URL -> which flat file holds it
+      sitemap.xml            every archived URL - pages and files - and the
+                             local file that holds it
+      archive-index.json     the same, as one flat array for scripts
+      assets-inventory.json  what file types the site holds, downloaded or not
+      assets.txt             downloaded file URLs, one per line
       assets-manifest.json   every downloaded file, its source pages and hash
       capture-errors.log     browser-side failures, when any
       sitemaps/              copies of the site's own sitemap.xml
@@ -211,6 +215,7 @@ set.
 |---|---|---|
 | `--assets <list>` | `documents` | Types to download: `documents`, `archives`, `media`, `code`, bare extensions, `all`, `none` |
 | `--no-assets` | — | Download nothing but pages |
+| `--survey` | — | Report what types a site holds and write nothing else (fast; see above) |
 | `--asset-ext <ext>` | — | Add one extension (repeatable) |
 | `--asset-domains <mode>` | `linked` | `same`, `linked` (also CDN-hosted files a page links directly) or `any` |
 | `--max-assets <n>` | `1000` | Ceiling on files downloaded |
@@ -374,8 +379,83 @@ Defaults and behaviour:
   from an included page is worth having even though its own URL sits elsewhere;
   `--exclude` means "never touch this".
 
-`report/assets-manifest.json` records every file — its URL, local name, size,
-SHA-256, and which pages linked it.
+### What the site holds, versus what you collected
+
+Two different questions, answered in two different places — worth keeping apart:
+
+| Report field | Answers |
+|---|---|
+| `options.assetExtensions` | **what this run was configured to accept.** A static echo of your `--assets` flag — with `--assets documents` it is always the same 25 extensions, on every site. |
+| `assetInventory` | **what the crawl actually found.** Every file type seen while crawling, downloaded or not, with what became of each. |
+
+The gap between them is the useful part: it names the types a crawl is walking
+past. The console shows it too:
+
+```
+  Asset types found: 3 type(s), 122 URL(s)
+    png      112   112 not in --assets
+    pdf        9   6 downloaded, 2 duplicate URL, 1 failed
+    on other hosts:
+      pdf        2   2 downloaded  [github.com]
+    not collected: png - add with --assets
+```
+
+Counts are of distinct URLs, not links — one PDF linked from forty pages is one
+PDF, and `linkedFromPages` in the JSON records the forty. Assets on the crawled
+host and on other hosts are counted separately, so a CDN-hosted corpus never
+reads as the domain's own.
+
+**Survey a site before committing to a download.** `--survey` fetches each page
+once for its links, archives nothing, downloads nothing, and writes one file:
+
+```bash
+node bin/archive.js https://example.com --survey           # what is there?
+node bin/archive.js https://example.com --assets pdf,zip   # now take it
+```
+
+A survey's cost is almost entirely the politeness delay — on a 57-page crawl the
+normal 500ms default accounted for **96%** of the wall clock — so `--survey`
+drops to `--delay 100` and `--concurrency 6`. Measured on
+`ontheline.trincoll.edu`: **9.5s, against 29.7s for the same crawl under
+`--dry-run`**, with identical findings. Pass `--delay` or `--concurrency`
+yourself and your value wins, so a site that rate-limits can still be surveyed
+gently.
+
+It writes only `report/assets-inventory.json` — 209 lines rather than the 3,900
+of a full report — which carries the tallies plus the crawl's shape, since "8
+types" means one thing for a complete crawl and another for one stopped at its
+page budget:
+
+```json
+{
+  "startUrl": "https://ontheline.trincoll.edu",
+  "crawl": { "pagesCrawled": 52, "maxDepth": 3, "complete": true, "mode": "survey" },
+  "configuredToAccept": ["pdf", "docx", "..."],
+  "totals": { "types": 8, "urls": 38 },
+  "byHost": { "internal": { "types": [] }, "external": { "types": [] } }
+}
+```
+
+### Where the downloaded URLs appear
+
+Downloaded file URLs surface in four places, so whichever one you already
+have open answers the question:
+
+| Where | Shape | Good for |
+|---|---|---|
+| `report/sitemap.xml` | `<url><loc>` beside the pages, local file in a comment | "is this URL in the archive, and where?" |
+| `report/archive-index.json` | one flat array of pages and files | scripting over the whole archive |
+| `report/assets.txt` | bare URLs, one per line | `xargs curl`, `wget -i`, diffing two crawls |
+| `report/assets-manifest.json` | full records — size, SHA-256, linking pages | auditing what was taken |
+| `report/assets-inventory.json` | types found, downloaded or not, plus crawl context | deciding what to collect next |
+
+The console summary also names the URLs it took, up to ten, then points at
+`assets.txt` for the rest.
+
+A file linked under several URLs gets an entry per URL, all naming the one
+stored copy, so a lookup by any of them succeeds; the entry says which URL owns
+the file. None of these are written for a dry run, which archives nothing for
+them to point at — `crawl-report.json` still lists what would have been taken.
 
 ### The lazy-image default
 
@@ -449,6 +529,8 @@ npm test
 
 Unit tests cover URL normalization, scope rules, the crawl frontier, sitemap
 parsing, link and embed extraction, the flat-filename scheme, asset
-classification and queueing, and the link rewriter. They launch no browser and
-reach nothing outside the machine — the few that exercise a real download run
-against a throwaway `http.createServer` on a loopback port.
+classification and queueing, the link rewriter, and every file the report
+writes — including that the generated sitemap stays well-formed XML when a URL
+contains an ampersand. They launch no browser and reach nothing outside the
+machine — the few that exercise a real download run against a throwaway
+`http.createServer` on a loopback port.

@@ -63,13 +63,26 @@ function extensionFromDisposition(header) {
  * end a crawl, so failures are recorded and the queue moves on.
  */
 class AssetDownloader {
-  constructor({ config, logger, report, rateLimiter, robots, directory, reportDirectory }) {
+  constructor({
+    config,
+    logger,
+    report,
+    rateLimiter,
+    robots,
+    directory,
+    reportDirectory,
+    inventory = null,
+  }) {
     this.config = config;
     this.logger = logger;
     this.report = report;
     this.rateLimiter = rateLimiter;
     this.robots = robots;
     this.directory = directory;
+    // Counts every type the site holds; the downloader reports outcomes back
+    // so the inventory can say what happened to each type, not just that it
+    // exists. Optional, so the class is still usable on its own.
+    this.inventory = inventory;
     this.manifestFile = path.join(reportDirectory, MANIFEST_FILENAME);
 
     this.names = new FlatNames(flatAssetName);
@@ -158,12 +171,14 @@ class AssetDownloader {
     if (!scope.allowed) {
       this.seen.add(url);
       this.report.recordAssetSkipped(url, `asset-${scope.reason}`);
+      if (this.inventory) this.inventory.markSkipped(url);
       return false;
     }
 
     if (this.downloaded.size + this.queued.size >= this.config.maxAssets) {
       this.seen.add(url);
       this.report.recordAssetSkipped(url, 'asset-budget-reached');
+      if (this.inventory) this.inventory.markSkipped(url);
       return false;
     }
 
@@ -234,6 +249,9 @@ class AssetDownloader {
         dryRun: true,
       });
       this.downloaded.set(item.url, { url: item.url, file: null, bytes: 0, sources: item.sources });
+      // Otherwise a dry run's inventory shows these URLs with no outcome at
+      // all, and the columns stop adding up to the URL count.
+      if (this.inventory) this.inventory.markPlanned(item.url);
     }
     this.queued.clear();
     return count;
@@ -270,6 +288,7 @@ class AssetDownloader {
 
     if (this.robots && !(await this.robots.isAllowed(item.url))) {
       report.recordAssetSkipped(item.url, 'asset-robots-disallowed');
+      if (this.inventory) this.inventory.markSkipped(item.url);
       logger.debug(`asset robots disallowed: ${item.url}`);
       return null;
     }
@@ -283,6 +302,11 @@ class AssetDownloader {
           entry.order = this._order++;
           this.downloaded.set(item.url, entry);
           report.recordAsset(entry);
+          if (this.inventory) {
+            this.inventory.markDownloaded(item.url, entry.bytes, {
+              duplicate: Boolean(entry.duplicateOf),
+            });
+          }
           logger.info(
             `asset ${this.downloaded.size}/${config.maxAssets} ` +
               `${item.url} -> ${entry.file} (${(entry.bytes / 1024).toFixed(0)} KB)`
@@ -302,6 +326,7 @@ class AssetDownloader {
     }
 
     report.recordAssetFailed({ url: item.url, error: lastError, sources: item.sources });
+    if (this.inventory) this.inventory.markFailed(item.url);
     logger.warn(`asset failed: ${item.url} -> ${lastError}`);
     return null;
   }
