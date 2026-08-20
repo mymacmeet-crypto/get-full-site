@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>SingleFile Auto Archiver — Setup</title>
+	<style>
+		:root {
+			color-scheme: light dark;
+		}
+
+		body {
+			font-family: system-ui, sans-serif;
+			max-width: 760px;
+			margin: 2em auto;
+			padding: 0 1em;
+			line-height: 1.5;
+		}
+
+		h1 {
+			font-size: 1.4em;
+		}
+
+		.card {
+			border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+			border-radius: 8px;
+			padding: 1em 1.25em;
+			margin: 1em 0;
+		}
+
+		.status-ok {
+			color: #2e7d32;
+			font-weight: 600;
+		}
+
+		.status-warn {
+			color: #c62828;
+			font-weight: 600;
+		}
+
+		button {
+			font-size: 1em;
+			padding: .45em 1em;
+			border-radius: 6px;
+			border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+			cursor: pointer;
+			margin-right: .5em;
+			margin-top: .25em;
+		}
+
+		pre {
+			background: color-mix(in srgb, currentColor 8%, transparent);
+			padding: .75em;
+			border-radius: 6px;
+			overflow-x: auto;
+			min-height: 2em;
+			white-space: pre-wrap;
+			word-break: break-all;
+		}
+
+		code {
+			background: color-mix(in srgb, currentColor 10%, transparent);
+			padding: 0 .3em;
+			border-radius: 4px;
+		}
+
+		.muted {
+			opacity: .75;
+			font-size: .92em;
+		}
+	</style>
+</head>
+
+<body>
+	<h1>SingleFile Auto Archiver — Setup</h1>
+	<p>Every page you visit is saved automatically as a single HTML file. Each browser session gets its own
+		subfolder (<code>session_&lt;date&gt;_&lt;time&gt;/</code>) containing <code>session.txt</code> (every URL with its
+		status — QUEUE, INPROGRESS, DOWNLOADED — and timestamp) and a <code>pages/</code> folder with the saved
+		HTML files, named after the URL (<code>gsmarena.com_phone_review.html</code>).</p>
+
+	<div class="card">
+		<h2>1. Archive folder</h2>
+		<p id="folderStatus">Checking…</p>
+		<button id="chooseFolderButton">Choose archive folder…</button>
+		<button id="grantButton" hidden>Re-grant access</button>
+		<p class="muted">Chrome will ask you to allow the extension to “view and edit” this folder — choose
+			<strong>Allow on every visit</strong> if offered, so access survives browser restarts.</p>
+	</div>
+
+	<div class="card">
+		<h2>2. Session log (session.txt)</h2>
+		<p class="muted">One line per URL: <code>URL&#9;STATUS&#9;time&#9;attempts</code>. Pages you leave too early
+			stay in <code>QUEUE</code> and are retried automatically. You can also hand-type a bare URL as a new line
+			in <code>session.txt</code> — it gets downloaded within seconds. After 5 failed attempts a line is marked
+			<code>FAILED</code>. Unfinished URLs carry over to the next session.</p>
+		<button id="refreshQueueButton">Refresh view</button>
+		<button id="runQueueButton">Run queue now</button>
+		<pre id="queueContent">(no folder selected)</pre>
+	</div>
+
+	<div class="card">
+		<h2>3. Diagnostics</h2>
+		<button id="diagButton">Check extension health</button>
+		<pre id="diagContent">(click to run)</pre>
+	</div>
+
+	<script type="module" src="../bg/ui-auto-archive.js"></script>
+</body>
+
+</html>

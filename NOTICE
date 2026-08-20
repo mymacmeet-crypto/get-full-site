@@ -8,10 +8,11 @@ later version. See LICENSE for the full text.
 
 WHY AGPL AND NOT MIT
 --------------------
-This repository ships its capture engine as source under vendor/capture-engine.
-That engine is SingleFile by Gildas Lormeau, licensed AGPL-3.0. Because its code
-is included here rather than merely depended upon, the AGPL covers the combined
-work, and this project is therefore AGPL-3.0-or-later as a whole.
+This repository ships its capture engine as source under vendor/capture-engine,
+and a browser extension built on SingleFile under extension/. Both are
+SingleFile by Gildas Lormeau, licensed AGPL-3.0. Because their code is included
+here rather than merely depended upon, the AGPL covers the combined work, and
+this project is therefore AGPL-3.0-or-later as a whole.
 
 Note the AGPL's network clause: if you run a modified version of this software
 on a server that users interact with over a network, those users are entitled to
@@ -24,6 +25,20 @@ vendor/capture-engine/
     GNU Affero General Public License v3.0
     https://github.com/gildas-lormeau/single-file-cli
     Modified - see vendor/capture-engine/NOTICE for the list of changes.
+
+extension/
+    SingleFile Auto Archiver (browser-only edition, build 2026-08-18.9),
+    a fork of SingleFile-MV3 1.22.98, Copyright (c) Gildas Lormeau
+    GNU Affero General Public License v3.0
+    https://github.com/gildas-lormeau/SingleFile-MV3
+    Fork: https://github.com/nayan-dey/singlefile-auto-archiver
+    The fork's changes against upstream SingleFile-MV3 are listed in
+    extension/AUTO-ARCHIVER.md. Vendored here without its build tooling
+    (package.json, rollup and eslint configs, build scripts) and without the
+    upstream user docs, GitHub templates and stress-test page; lib/ is the
+    prebuilt bundle the extension actually loads. The AGPL headers in the
+    vendored sources are intact, and the LICENSE at the root of this
+    repository is the same AGPL-3.0 text the fork ships.
 
 vendor/simple-cdp/
     simple-cdp 1.10.0, Copyright (c) 2024 Gildas Lormeau

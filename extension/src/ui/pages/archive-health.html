@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Auto Archiver — Health</title>
+	<style>
+		body {
+			font: 14px/1.5 system-ui, sans-serif;
+			max-width: 820px;
+			margin: 2em auto;
+			padding: 0 1em;
+			background: #17171a;
+			color: #eee;
+		}
+
+		h1 {
+			font-size: 1.3em;
+		}
+
+		#verdict {
+			font-size: 1.05em;
+			font-weight: 600;
+			padding: 12px 16px;
+			border-radius: 10px;
+			margin: 1em 0;
+			background: #223;
+		}
+
+		#verdict.ok {
+			background: #143a1e;
+			color: #7ee2a0;
+		}
+
+		#verdict.warn {
+			background: #3a2e10;
+			color: #ffd479;
+		}
+
+		#verdict.bad {
+			background: #3f1614;
+			color: #ff9a92;
+		}
+
+		.grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+			gap: 12px;
+		}
+
+		.card {
+			background: #202024;
+			border: 1px solid #333;
+			border-radius: 10px;
+			padding: 12px 14px;
+		}
+
+		.card h2 {
+			font-size: .8em;
+			text-transform: uppercase;
+			letter-spacing: .06em;
+			color: #9aa;
+			margin: 0 0 6px;
+		}
+
+		.value {
+			font-size: 1.5em;
+			font-weight: 650;
+		}
+
+		.sub {
+			color: #9aa;
+			font-size: .85em;
+		}
+
+		ul#warnings {
+			padding-left: 1.2em;
+		}
+
+		ul#warnings li {
+			margin: .3em 0;
+		}
+
+		.muted {
+			color: #9aa;
+			font-size: .9em;
+		}
+	</style>
+</head>
+
+<body>
+	<h1>Auto Archiver — Health &amp; Performance</h1>
+	<div id="verdict">Measuring…</div>
+	<div class="grid" id="cards"></div>
+	<h2 style="font-size:1em;margin-top:1.5em">Notes</h2>
+	<ul id="warnings"><li class="muted">Collecting…</li></ul>
+	<p class="muted">Auto-refreshes every 5 seconds. System CPU/RAM are machine-wide readings; "extension heap"
+		and "worker lag" measure the extension itself.</p>
+	<script type="module" src="../bg/ui-archive-health.js"></script>
+</body>
+
+</html>

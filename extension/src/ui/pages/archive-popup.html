@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<title>Auto Archiver</title>
+	<style>
+		body {
+			font: 13px/1.5 system-ui, sans-serif;
+			width: 340px;
+			margin: 0;
+			padding: 10px 12px;
+			background: #1d1d20;
+			color: #eee;
+		}
+
+		h1 {
+			font-size: 13px;
+			margin: 0 0 8px;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+
+		#saveNowButton {
+			font: inherit;
+			background: #1A73E8;
+			color: #fff;
+			border: 0;
+			border-radius: 6px;
+			padding: 4px 10px;
+			cursor: pointer;
+		}
+
+		#saveNowButton:hover {
+			background: #1765cc;
+		}
+
+		ul {
+			list-style: none;
+			margin: 0;
+			padding: 0;
+			max-height: 320px;
+			overflow-y: auto;
+		}
+
+		li {
+			padding: 6px 4px;
+			border-top: 1px solid #333;
+			display: flex;
+			gap: 8px;
+			align-items: baseline;
+		}
+
+		.file {
+			flex: 1;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.url {
+			display: block;
+			color: #999;
+			font-size: 11px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.time {
+			color: #999;
+			font-size: 11px;
+			white-space: nowrap;
+		}
+
+		.empty {
+			color: #999;
+			padding: 12px 4px;
+		}
+
+		footer {
+			margin-top: 8px;
+			border-top: 1px solid #333;
+			padding-top: 6px;
+		}
+
+		footer a {
+			color: #8ab4f8;
+			cursor: pointer;
+			text-decoration: none;
+			font-size: 12px;
+		}
+	</style>
+</head>
+
+<body>
+	<h1><span>Saved from this tab</span><button id="saveNowButton">Save now</button></h1>
+	<ul id="historyList">
+		<li class="empty">Loading…</li>
+	</ul>
+	<footer><a id="setupLink">Setup &amp; session log</a> &nbsp;·&nbsp; <a id="healthLink">Health</a></footer>
+	<script type="module" src="../bg/ui-archive-popup.js"></script>
+</body>
+
+</html>

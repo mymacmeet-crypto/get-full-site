@@ -85,6 +85,12 @@ vendor/
 Both are plain source. Neither contains a `package.json` or a `node_modules`
 directory, and neither is an npm dependency.
 
+`extension/` is checked-in third-party source too, but it is not under
+`vendor/` because it is a component you run rather than a library this project
+drives — see [Browser extension](#browser-extension). It needs none of the
+renaming described below: Chrome loads it, not Node, so Node's module
+resolution never sees it.
+
 Dropping `package.json` has one consequence worth knowing. Both packages are
 ESM, and they declared that through `"type": "module"` in the manifest we
 removed. Without it Node resolves `.js` against the nearest package.json going
@@ -236,6 +242,43 @@ set.
 
 Exit codes: `0` success, `2` nothing archived but failures occurred, `130`
 interrupted (resumable), `1` startup error.
+
+## Browser extension
+
+`extension/` holds a second, complementary way to archive: a Chrome extension
+that saves pages **as you browse them**, rather than crawling a domain on
+demand. It is [SingleFile Auto
+Archiver](https://github.com/nayan-dey/singlefile-auto-archiver), a fork of
+SingleFile-MV3, checked in as source the same way the capture engine is.
+
+```bash
+# nothing to install — lib/ is the prebuilt bundle
+# chrome://extensions -> Developer mode -> Load unpacked -> select extension/
+```
+
+The two halves do different jobs, and the split is worth understanding:
+
+| | `web-archiver` CLI | `extension/` |
+|---|---|---|
+| decides what to take | crawler: sitemap, links, scope rules | you do, by visiting pages |
+| session state | anonymous fetches | your real browser — logins and cookies apply |
+| output | `archive/<domain>/raw-html/`, flat and hash-deduped | `session_<date>_<time>/pages/` in a folder you pick |
+| runs | when you invoke it | continuously, in the background |
+
+That middle row is the reason the extension is here at all: it captures the
+rendered, authenticated DOM of a page you are actually logged into, which a
+crawler driving its own browser structurally cannot reach.
+
+The two do not share state today. The extension tracks work in a `session.txt`
+status file; nothing in `src/` reads that format, and `bin/archive.js` takes a
+start URL as a required argument rather than a URL list. Feeding one into the
+other means adding a list-ingest mode to the CLI — see
+`extension/AUTO-ARCHIVER.md` for the file format if you want to build that.
+
+`extension/` carries no `package.json` and adds no dependency to this project.
+Chrome loads the bundles in `extension/lib/`, so **edits under
+`extension/src/core/` have no effect until those bundles are rebuilt** — the
+rebuild recipe is in `extension/AUTO-ARCHIVER.md`.
 
 ## How it works
 
@@ -501,6 +544,8 @@ rather than a preference. `vendor/capture-engine` is
 [SingleFile](https://github.com/gildas-lormeau/single-file-cli) by Gildas
 Lormeau, licensed AGPL-3.0. Including its source here rather than depending on
 it means the AGPL covers the combined work, so the whole repository is AGPL.
+`extension/` is AGPL-3.0 SingleFile code as well, so it lands on the same side
+of that line.
 
 Two things follow that are easy to miss:
 
@@ -510,7 +555,10 @@ Two things follow that are easy to miss:
 - **Renaming the directory changes nothing about authorship.** `capture-engine`
   is SingleFile. Its `LICENSE` and the AGPL headers in its sources are intact,
   and `vendor/capture-engine/NOTICE` records the version it came from and every
-  modification made to it.
+  modification made to it. The same holds for `extension/`: the AGPL headers in
+  its sources are intact, its changes against upstream SingleFile-MV3 are listed
+  in `extension/AUTO-ARCHIVER.md`, and the root `LICENSE` is the same AGPL-3.0
+  text the fork ships, so no duplicate copy is kept inside `extension/`.
 
 `vendor/simple-cdp` is **MIT** (© 2024 Gildas Lormeau) and imposes no copyleft
 of its own; its `LICENSE.txt` is kept alongside it.
