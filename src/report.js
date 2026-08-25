@@ -241,10 +241,32 @@ class CrawlReport {
     };
   }
 
+  /**
+   * Path in report/ for one of this run's files.
+   *
+   * A dry run and a survey archive nothing, so their output must never land on
+   * the filenames a real crawl wrote. The pages and files that crawl saved are
+   * still on disk, and a report claiming `dryRun: true` sitting next to them
+   * reads as though the dry run had downloaded them. It also kept the wrong
+   * settings: tools/resumable.js carries a crawl's options forward from
+   * crawl-report.json, and a dry run overwriting it fed a dry run's options
+   * into the next --resume.
+   *
+   *   real crawl  report/crawl-report.json
+   *   --dry-run   report/crawl-report.dry-run.json
+   *   --survey    report/assets-inventory.survey.json
+   */
+  _reportPath(siteDirectory, fileName) {
+    const mode = this.config.survey ? 'survey' : this.config.dryRun ? 'dry-run' : null;
+    const named = mode ? fileName.replace(/(\.[^.]+)$/, `.${mode}$1`) : fileName;
+    return path.join(reportDir(siteDirectory), named);
+  }
+
   /** Write the JSON report into report/; returns the file path. */
   write(report, siteDirectory) {
-    const file =
-      this.config.reportFile || path.join(reportDir(siteDirectory), 'crawl-report.json');
+    // An explicit --report path is the caller's own choice of filename and is
+    // used verbatim, dry run or not.
+    const file = this.config.reportFile || this._reportPath(siteDirectory, 'crawl-report.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(report, null, 2));
     return file;
@@ -422,7 +444,7 @@ class CrawlReport {
       byHost: inventory.byHost,
     };
 
-    const file = path.join(reportDir(siteDirectory), 'assets-inventory.json');
+    const file = this._reportPath(siteDirectory, 'assets-inventory.json');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(payload, null, 2));
     return file;

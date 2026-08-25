@@ -118,7 +118,7 @@ function createProgram() {
       '--survey',
       'find out what file types a site holds and nothing else: fetch each page ' +
         'once for its links, archive nothing, download nothing, and write only ' +
-        'report/assets-inventory.json. Uses a lower --delay and higher ' +
+        'report/assets-inventory.survey.json. Uses a lower --delay and higher ' +
         '--concurrency than a normal crawl, since nothing is being saved'
     )
     .option('-o, --output <dir>', 'base output directory (overrides OUTPUT_FOLDER from .env)')

@@ -131,7 +131,7 @@ class Crawler {
     if (config.survey) {
       logger.info(
         'Survey: reading each page for its links only - nothing is archived or ' +
-          'downloaded. Writing report/assets-inventory.json.'
+          'downloaded. Writing report/assets-inventory.survey.json.'
       );
     }
     logger.info(

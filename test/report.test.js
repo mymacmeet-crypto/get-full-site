@@ -102,6 +102,58 @@ test('archiveEntries leaves out what was never written to disk', () => {
 });
 
 // --------------------------------------------------------------------------
+// report filenames: a run that archives nothing must not overwrite a real one
+// --------------------------------------------------------------------------
+
+test('a real crawl writes the plain report filenames', () => {
+  const report = populated();
+  const dir = tmpdir();
+  assert.equal(path.basename(report.write(report.build(3), dir)), 'crawl-report.json');
+  assert.equal(
+    path.basename(report.writeAssetInventory(withInventory(report), dir)),
+    'assets-inventory.json'
+  );
+});
+
+test('a dry run writes beside a real crawl rather than over it', () => {
+  const dir = tmpdir();
+  const real = populated();
+  const realFile = real.write(real.build(3), dir);
+
+  const dry = populated();
+  dry.config.dryRun = true;
+  const dryFile = dry.write(dry.build(3), dir);
+  const dryInventory = dry.writeAssetInventory(withInventory(dry), dir);
+
+  assert.equal(path.basename(dryFile), 'crawl-report.dry-run.json');
+  assert.equal(path.basename(dryInventory), 'assets-inventory.dry-run.json');
+  assert.notEqual(dryFile, realFile);
+  // The real crawl's report is the one tools/resumable.js reads to carry a
+  // crawl's options into --resume, so it has to survive untouched.
+  assert.equal(JSON.parse(fs.readFileSync(realFile, 'utf8')).options.dryRun, false);
+});
+
+test('a survey writes its inventory under its own name', () => {
+  const report = populated();
+  report.config.survey = true;
+  report.config.dryRun = true;
+  const file = report.writeAssetInventory(withInventory(report), tmpdir());
+
+  assert.equal(path.basename(file), 'assets-inventory.survey.json');
+});
+
+test('an explicit --report path is used verbatim, dry run or not', () => {
+  const dir = tmpdir();
+  const target = path.join(dir, 'somewhere-else.json');
+  const report = populated();
+  report.config.dryRun = true;
+  report.config.reportFile = target;
+
+  assert.equal(report.write(report.build(3), dir), target);
+  assert.ok(fs.existsSync(target));
+});
+
+// --------------------------------------------------------------------------
 // sitemap.xml
 // --------------------------------------------------------------------------
 
