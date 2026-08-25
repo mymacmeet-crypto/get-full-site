@@ -36,6 +36,65 @@
 			background: #1765cc;
 		}
 
+		#saveNowButton:disabled {
+			background: #3c4043;
+			color: #999;
+			cursor: default;
+		}
+
+		.switch {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+			padding: 0 4px 9px;
+			margin-bottom: 9px;
+			border-bottom: 1px solid #333;
+		}
+
+		#powerButton {
+			font: inherit;
+			font-weight: 600;
+			border: 0;
+			border-radius: 6px;
+			padding: 5px 12px;
+			cursor: pointer;
+			min-width: 62px;
+		}
+
+		#powerButton[data-state="running"] {
+			background: #3c2326;
+			color: #f28b82;
+		}
+
+		#powerButton[data-state="running"]:hover {
+			background: #4a2b2f;
+		}
+
+		#powerButton[data-state="stopped"] {
+			background: #1e3a29;
+			color: #81c995;
+		}
+
+		#powerButton[data-state="stopped"]:hover {
+			background: #264a34;
+		}
+
+		#powerButton:disabled {
+			opacity: .6;
+			cursor: default;
+		}
+
+		#powerStatus {
+			flex: 1;
+			font-size: 12px;
+			color: #999;
+		}
+
+		#powerStatus strong {
+			color: #eee;
+			font-weight: 600;
+		}
+
 		ul {
 			list-style: none;
 			margin: 0;
@@ -94,6 +153,10 @@
 </head>
 
 <body>
+	<div class="switch">
+		<button id="powerButton" data-state="running" disabled>…</button>
+		<span id="powerStatus">Checking…</span>
+	</div>
 	<h1><span>Saved from this tab</span><button id="saveNowButton">Save now</button></h1>
 	<ul id="historyList">
 		<li class="empty">Loading…</li>

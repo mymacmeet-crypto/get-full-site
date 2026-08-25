@@ -20,6 +20,7 @@
 import * as config from "./config.js";
 import * as offscreen from "./offscreen.js";
 import * as tabsData from "./tabs-data.js";
+import { isPaused } from "./archive-pause.js";
 
 const BUILD_ID = "2026-08-18.9";
 const ALARM_NAME = "auto-archive-queue";
@@ -205,6 +206,7 @@ async function onMessage(message) {
 		return {
 			build: BUILD_ID,
 			armResult,
+			paused: await isPaused(),
 			autoSaveAll: Boolean(allTabsData.autoSaveAll),
 			session: sessionName || (await chrome.storage.session.get(SESSION_KEY))[SESSION_KEY] || null,
 			offscreenState: state,
@@ -251,6 +253,7 @@ async function onMessage(message) {
 		return {
 			build: BUILD_ID,
 			session,
+			paused: await isPaused(),
 			folderState: state,
 			alarmScheduled: Boolean(alarm),
 			lastPollAgeMs: sessionData.autoArchiveLastPoll ? Date.now() - sessionData.autoArchiveLastPoll : null,
@@ -466,6 +469,12 @@ async function onNavigation(url) {
 		if (!isArchivableUrl(url)) {
 			return;
 		}
+		// Before the parking branch below, deliberately: a page visited while
+		// archiving is off must not be queued either, or pressing Start would
+		// archive everything browsed in the meantime.
+		if (await isPaused()) {
+			return;
+		}
 		if (!(await isReady())) {
 			// folder unavailable: park the URL in extension storage so it can be
 			// drained into session.txt once access is re-granted
@@ -532,7 +541,10 @@ async function markFailedAttempt(url) {
 }
 
 async function processQueue() {
-	if (processingQueue || !saveUrls || !(await isReady())) {
+	// Stop means stop: without this the 10-second poller would keep replaying
+	// whatever is still sitting in session.txt, so pages would carry on being
+	// archived after the user switched archiving off.
+	if (processingQueue || !saveUrls || (await isPaused()) || !(await isReady())) {
 		return {};
 	}
 	processingQueue = true;

@@ -25,6 +25,7 @@
 
 import * as config from "./config.js";
 import * as tabsData from "./tabs-data.js";
+import { isPaused } from "./archive-pause.js";
 
 export {
 	autoSaveIsEnabled,
@@ -33,9 +34,15 @@ export {
 
 async function autoSaveIsEnabled(tab) {
 	if (tab) {
-		// Auto Archiver fork: auto-save is always armed — it no longer depends
-		// on the tabsData.autoSaveAll flag. Per-site opt-out stays possible by
-		// mapping a URL rule to the disabled profile.
+		// The popup's Stop button. Checked first and read fresh on every
+		// navigation, so stopping takes effect on the very next page without
+		// touching the tabs that are already open.
+		if (await isPaused()) {
+			return false;
+		}
+		// Auto Archiver fork: auto-save is otherwise always armed — it no longer
+		// depends on the tabsData.autoSaveAll flag. Per-site opt-out stays
+		// possible by mapping a URL rule to the disabled profile.
 		const rule = await config.getRule(tab.url);
 		return !rule || rule.autoSaveProfile != config.DISABLED_PROFILE_NAME;
 	}

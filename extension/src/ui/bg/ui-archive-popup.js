@@ -1,10 +1,12 @@
 /*
- * Auto Archiver — toolbar popup: lists the pages archived from the current
- * tab (kept in chrome.storage.session by the background) and offers a manual
- * "Save now" for the visible page.
+ * Auto Archiver — toolbar popup: starts and stops automatic archiving, lists
+ * the pages archived from the current tab (kept in chrome.storage.session by
+ * the background) and offers a manual "Save now" for the visible page.
  */
 
 /* global chrome, document */
+
+import { isPaused, setPaused, refreshBadge } from "./ui-archive-pause.js";
 
 const STATUS_ICONS = {
 	queued: "🕓",
@@ -16,6 +18,22 @@ const STATUS_ICONS = {
 const historyList = document.getElementById("historyList");
 const saveNowButton = document.getElementById("saveNowButton");
 const setupLink = document.getElementById("setupLink");
+const powerButton = document.getElementById("powerButton");
+const powerStatus = document.getElementById("powerStatus");
+
+powerButton.addEventListener("click", async () => {
+	const stopping = powerButton.dataset.state == "running";
+	powerButton.disabled = true;
+	powerButton.textContent = stopping ? "Stopping…" : "Starting…";
+	try {
+		await setPaused(stopping);
+	} catch (error) {
+		powerStatus.textContent = "Could not switch: " + error.message;
+	}
+	await refreshPower();
+});
+
+refreshPower();
 
 saveNowButton.addEventListener("click", async () => {
 	saveNowButton.disabled = true;
@@ -38,6 +56,19 @@ document.getElementById("healthLink").addEventListener("click", () => {
 
 refresh();
 setInterval(refresh, 2000);
+
+async function refreshPower() {
+	const stopped = await isPaused();
+	powerButton.disabled = false;
+	powerButton.dataset.state = stopped ? "stopped" : "running";
+	powerButton.textContent = stopped ? "Start" : "Stop";
+	powerStatus.innerHTML = stopped
+		? "<strong>Stopped.</strong> Pages you visit are not being saved."
+		: "<strong>Running.</strong> Every page you visit is saved.";
+	// "Save now" stays available while stopped — an explicit click is not the
+	// automatic archiving that was switched off.
+	await refreshBadge(stopped);
+}
 
 async function refresh() {
 	const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

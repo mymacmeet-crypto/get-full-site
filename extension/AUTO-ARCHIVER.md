@@ -3,6 +3,7 @@
 A fork of [SingleFile-MV3](https://github.com/gildas-lormeau/SingleFile-MV3) that turns SingleFile into a hands-free web archiver:
 
 - **Every page you visit is saved automatically** as a single `.html` file — no clicking the extension button.
+- **A Start/Stop button** in the toolbar popup switches that off and back on, with an `off` badge on the icon while it is stopped.
 - Pages are written straight into a **folder you choose** (via the File System Access API), not the Downloads history.
 - If you navigate away **before a save finishes**, the URL is recorded in **`queue.txt`** inside that folder.
 - Every **~10 seconds** the extension polls `queue.txt`, opens each pending URL in a background tab (so your logins/cookies apply), saves it, and removes the line.
@@ -18,6 +19,40 @@ A fork of [SingleFile-MV3](https://github.com/gildas-lormeau/SingleFile-MV3) tha
 
 That's it — browse normally. To revisit the setup page later, open
 `chrome-extension://<extension-id>/src/ui/pages/auto-archive.html`.
+
+## Start / Stop
+
+Click the extension icon. The popup opens with the switch at the top:
+
+```
+[ Stop ]  Running. Every page you visit is saved.
+[ Start ] Stopped. Pages you visit are not being saved.
+```
+
+While stopped the toolbar icon carries a grey **off** badge, so a tab that has
+quietly stopped being archived can't be mistaken for one that was saved. The
+setting is kept in `chrome.storage.local`, so it survives a service worker
+restart and a browser restart — stopped stays stopped until you press Start.
+
+**Save now still works while stopped.** Clicking it is an explicit request, not
+the automatic archiving that was switched off.
+
+Stop does two things. It sets a `autoArchivePaused` flag, and it clears
+`autoSaveLoad` / `autoSaveLoadOrUnload` on every profile except the disabled one.
+The second is what the *currently shipped* `lib/` bundle actually obeys:
+`autosave.onInit` re-reads the profile on every navigation and only enqueues and
+captures a page when one of those two is set. Start puts each profile back
+exactly as it was — the previous values are snapshotted under
+`autoArchivePausedProfiles` rather than assumed, so a customised profile is not
+overwritten with this fork's defaults.
+
+> **One gap until `lib/` is rebuilt.** The flag is checked by
+> `autoSaveIsEnabled()`, `onNavigation()` and `processQueue()` in `src/core/bg/`,
+> but Chrome runs the bundles in `lib/`, which predate those checks. So with the
+> bundle as shipped, Stop reliably prevents new pages from being queued or
+> captured — but URLs *already* sitting in `session.txt` keep being replayed by
+> the 10-second poller until the queue drains. Rebuilding `lib/` (below) closes
+> that: `processQueue()` then returns immediately while stopped.
 
 ## queue.txt format
 
@@ -39,6 +74,10 @@ Fields are `timestamp  URL  attempt-count`, tab- or space-separated; only the UR
 | `src/core/bg/autosave.js` | Enqueues each navigated URL before saving; writes the finished page into the archive folder instead of Downloads when a folder is connected; marks queue entries saved. |
 | `src/core/bg/downloads.js` | Same folder-write branch for the manual/queue-replay save pipeline. |
 | `src/core/bg/business.js` | Fixed a missing `await` on `autoSaveIsEnabled()`. |
+| `src/core/bg/archive-pause.js` | **New.** The Start/Stop flag and its storage keys, in one module because both the service worker and the UI pages read it and must agree on the key. |
+| `src/core/bg/autosave-util.js` | `autoSaveIsEnabled()` returns false while stopped, checked before the URL-rule lookup and read fresh on every navigation. |
+| `src/ui/bg/ui-archive-pause.js` | **New.** UI side of the switch: snapshots and restores each profile's auto-save triggers, and paints the `off` badge. |
+| `src/ui/pages/archive-popup.html` + `src/ui/bg/ui-archive-popup.js` | The Start/Stop button and its status line. |
 | `src/core/bg/config.js` | Defaults changed to save on page **load** (`autoSaveLoad: true`, `autoSaveLoadOrUnload: false`). |
 | `src/ui/pages/auto-archive.html` + `src/ui/bg/ui-auto-archive.js` | **New.** Setup page: folder picker, permission re-grant, queue viewer, "run queue now". |
 | `manifest.json` | Renamed, added `alarms` permission. |
@@ -60,6 +99,12 @@ Chrome loads the archiving logic from the **bundles in `lib/`**, not from
 `lib/single-file-extension-background.js`; only the UI pages under
 `src/ui/pages/` and `src/core/devtools/` are read from source. So **editing
 `src/core/bg/*.js` changes nothing until `lib/` is rebuilt.**
+
+The Start/Stop switch is deliberately built so that the half which needs no
+rebuild carries it: the button, the badge and the profile-flipping all live in
+`src/ui/`, which Chrome *does* read from source. The service-worker checks in
+`src/core/bg/` are the belt to that braces, and only bite once `lib/` is
+regenerated — see the gap noted under [Start / Stop](#start--stop).
 
 This vendored copy intentionally ships without that build tooling — no
 `package.json`, no rollup config, no dependencies to install. To change
