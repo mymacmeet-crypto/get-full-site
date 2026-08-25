@@ -6,7 +6,8 @@
   "type": "commonjs",
   "main": "src/crawler.js",
   "bin": {
-    "web-archiver": "bin/archive.js"
+    "web-archiver": "bin/archive.js",
+    "web-archiver-dataset": "bin/dataset.js"
   },
   "engines": {
     "node": ">=22.4.0"
@@ -15,7 +16,8 @@
     "start": "node bin/archive.js",
     "archive": "pwsh -NoProfile -ExecutionPolicy Bypass -File runner.ps1",
     "archive:sh": "bash runner.sh",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "dataset": "node bin/dataset.js"
   },
   "keywords": [
     "crawler",

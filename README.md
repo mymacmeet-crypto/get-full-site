@@ -30,6 +30,10 @@ archive/
       assets-manifest.json   every downloaded file, its source pages and hash
       capture-errors.log     browser-side failures, when any
       sitemaps/              copies of the site's own sitemap.xml
+
+      crawl-report.dry-run.json      a --dry-run's findings, kept apart so it
+      assets-inventory.dry-run.json  never overwrites the report above
+      assets-inventory.survey.json   the same, for --survey
       .crawl-state.json      resume state (removed on a clean finish)
     raw-html/
       index.html
@@ -242,6 +246,139 @@ set.
 
 Exit codes: `0` success, `2` nothing archived but failures occurred, `130`
 interrupted (resumable), `1` startup error.
+
+## Collecting a text corpus
+
+`bin/dataset.js` is a third way to take a site, for when the goal is **the text
+rather than the pages**: a corpus for retrieval or training, not an offline
+replica.
+
+It only works on sites built with Adobe Edge Delivery Services — aem.live
+itself, and anything else on that stack — but for those it makes the crawler and
+the browser unnecessary, because such a site already publishes both halves of
+what a crawl exists to reconstruct:
+
+```
+<origin>/query-index.json    every published path, with title, description,
+                             lastModified and a robots column
+<path>.md                    that page as clean Markdown
+```
+
+The index *is* the document list, so there is no frontier, no link discovery and
+no capture:
+
+```bash
+node bin/dataset.js https://www.aem.live
+```
+
+### Why this is not the archiver with different settings
+
+Measured on `www.aem.live`, per page:
+
+| | Archiver capture | `.md` |
+|---|---|---|
+| Bytes | ~1,100 KB | 8.8 KB |
+| Visible text | **0.9%** | ~100% |
+| Needs a browser | yes | no |
+| Whole site (181 docs) | ~215 MB | **1.8 MB** |
+
+And the Markdown is not a lossy summary of the capture — it holds *more* prose.
+Diffed on one page, the `.md` carried 126 distinct words to the capture's 100;
+the only seven present in the capture and missing from the Markdown were
+`home, documentation, back, mail, select, link, copied`, which is nav chrome.
+
+Full collection of the site: **19s**. A refresh with nothing changed: **1.7s**.
+
+### The refresh is the point
+
+Rerunning the same command is the refresh. Every record stores the index's
+`lastModified`, so the second run re-fetches only documents whose timestamp has
+moved and reuses the rest from `dataset.jsonl`:
+
+```
+181 document(s) in scope: 3 to fetch, 178 unchanged, 14 skipped
+```
+
+A document that disappears from the index is dropped from the corpus rather than
+lingering — a retrieval index that still answers with unpublished pages is worse
+than one missing them. A row with no `lastModified` at all is always re-fetched:
+without a timestamp there is no evidence it is unchanged, and quietly keeping a
+stale record costs more than one request. `--force` rebuilds everything.
+
+### `noindex` is honoured
+
+The index's `robots` column is the publisher marking one specific document, which
+is more precise than a robots.txt path pattern — so pages marked `noindex` are
+left out by default. On aem.live that removes 14 documents, and they are exactly
+the ones a corpus should not contain:
+
+```
+/footer  /new-nav  /new-footer  /side-navigation      site chrome
+/thank-you  /business/thank-you  /vip/thank-you       form landings
+/drafts/uncled/helix6  /experiments/short-home/home   unpublished
+```
+
+`--include-noindex` collects them anyway.
+
+### Output
+
+```
+archive/
+  www.aem.live/
+    markdown/               one .md file per document, in folders that mirror
+      index.md              the site: /developer/x -> developer/x.md, and a
+      developer/            directory path like /docs/ -> docs/index.md
+        aem-playground.md
+      docs/
+        index.md
+    dataset.jsonl           one JSON object per document, sorted by path
+    dataset-manifest.json   totals, per-section counts, failures, and the
+                            per-document state the next refresh reads
+```
+
+The `markdown/` folder is there so the corpus can be read, grepped and diffed
+without a JSON parser — the same text that is in `dataset.jsonl`, one file per
+document. It is rewritten on every run, including one where nothing was
+re-fetched: the text is already in hand, so the writes cost nothing, and the
+folder can never drift out of step with the dataset. A document that leaves the
+site has its file deleted too, along with any directory that empties. Paths come
+from a remote index, so every segment is sanitized and `..` segments are dropped
+— a row in the index can never write outside the output folder.
+
+`--no-files` skips the folder and writes only the JSONL and the manifest.
+`--files-dir <dir>` puts it somewhere else.
+
+`--dry-run` fetches no documents and writes no corpus. It leaves a
+`dataset-manifest.dry-run.json` naming every document it would fetch, reuse,
+drop or skip, so the plan can be read before it is run - and, like the
+archiver`s own dry run, its `.dry-run` filename means it can never overwrite
+what a real collection wrote.
+
+One record per line:
+
+```json
+{
+  "id": "3f2a…", "url": "https://www.aem.live/developer/aem-playground",
+  "path": "/developer/aem-playground", "section": "developer",
+  "title": "Explore new AI workflows in AEM", "description": "…",
+  "lastModified": "2026-08-05T20:21:41.000Z", "publicationDate": null,
+  "source": "https://www.aem.live/developer/aem-playground.md",
+  "format": "markdown", "bytes": 8454, "sha256": "…",
+  "fetchedAt": "2026-08-24T…", "text": "# Explore new AI workflows in AEM\n\n…"
+}
+```
+
+JSONL because every consumer of a corpus streams it line by line, and because
+one record per document keeps the metadata beside the text instead of in a
+parallel index that drifts out of step with it. Records are sorted by path so
+two runs diff cleanly.
+
+**Documents are stored whole, deliberately unchunked.** Chunk boundaries depend
+on the embedding model's window and on how the retriever scores overlap, so they
+are a retrieval-engine decision — this keeps the document and its structure
+intact and leaves splitting to whatever consumes it.
+
+Flags and examples: [command.md](command.md#collecting-a-text-corpus).
 
 ## Browser extension
 
@@ -464,10 +601,10 @@ drops to `--delay 100` and `--concurrency 6`. Measured on
 yourself and your value wins, so a site that rate-limits can still be surveyed
 gently.
 
-It writes only `report/assets-inventory.json` — 209 lines rather than the 3,900
-of a full report — which carries the tallies plus the crawl's shape, since "8
-types" means one thing for a complete crawl and another for one stopped at its
-page budget:
+It writes only `report/assets-inventory.survey.json` — 209 lines rather than the
+3,900 of a full report — which carries the tallies plus the crawl's shape, since
+"8 types" means one thing for a complete crawl and another for one stopped at
+its page budget:
 
 ```json
 {
@@ -498,7 +635,16 @@ The console summary also names the URLs it took, up to ten, then points at
 A file linked under several URLs gets an entry per URL, all naming the one
 stored copy, so a lookup by any of them succeeds; the entry says which URL owns
 the file. None of these are written for a dry run, which archives nothing for
-them to point at — `crawl-report.json` still lists what would have been taken.
+them to point at — `crawl-report.dry-run.json` still lists what would have been
+taken.
+
+A dry run and a survey write under their own filenames on purpose. They archive
+nothing, so landing on the filenames above would replace a real crawl's report
+while that crawl's pages and files were still sitting in `raw-html/` and
+`assets/` — a report saying `dryRun: true` next to a full `assets/` folder reads
+as though the dry run had downloaded it. It also fed the wrong settings into the
+next `--resume`, which carries a crawl's options forward from
+`crawl-report.json`. An explicit `--report <file>` is still used verbatim.
 
 ### The lazy-image default
 
