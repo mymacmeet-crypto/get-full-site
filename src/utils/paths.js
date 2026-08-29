@@ -7,26 +7,37 @@ const { shortHash } = require('./misc');
  * Every archived site gets exactly one directory:
  *
  *   <out>/example.com/report/      reports, archive sitemap, resume state
- *   <out>/example.com/raw-html/    one standalone HTML file per page, FLAT
+ *   <out>/example.com/site-data/   one file per page, NESTED to mirror the URL
  *   <out>/example.com/assets/      linked files (PDFs, spreadsheets, ...), FLAT
  *
  * assets/ only appears when the crawl actually downloaded something.
  *
- * raw-html/ and assets/ are deliberately flat - the site's directory structure
- * is folded into the filename instead of becoming nested folders:
+ * site-data/ mirrors the site's own path structure, and a page's HTML and
+ * Markdown are the same name with different extensions, so the two formats sit
+ * side by side and either one is findable from a URL by reading it:
  *
- *   https://example.com/              -> index.html
- *   https://example.com/about         -> about.html
- *   https://example.com/blog/post-1   -> blog-post-1.html
- *   https://example.com/a/b/c/        -> a-b-c.html
+ *   https://example.com/              -> index.html      index.md
+ *   https://example.com/about         -> about.html      about.md
+ *   https://example.com/blog/post-1   -> blog/post-1.html
+ *   https://example.com/a/b/c/        -> a/b/c/index.html
  *   https://example.com/p?page=2      -> p_q_page-2.html
+ *
+ * A page at /blog and pages under /blog/ coexist as blog.html beside a blog/
+ * directory, which every filesystem this runs on allows.
+ *
+ * assets/ stays flat instead - a downloaded file is referenced by name from
+ * pages at many different depths, so one directory keeps that link short and
+ * identical from everywhere:
+ *
  *   https://example.com/docs/f.pdf    -> docs-f.pdf   (in assets/)
  *
- * Flattening can make two different URLs want the same name (/a/b and /a-b),
- * so names are handed out through FlatNames, which appends a short URL hash to
+ * Either rule can make two different URLs want the same name (/a/b/c and
+ * /a/b/c/ both want a/b/c/index.html; /a/b and /a-b both want a-b.pdf), so
+ * names are handed out through FlatNames, which appends a short URL hash to
  * the loser of any collision rather than letting one page overwrite another.
  */
 
+const SITE_DATA_DIRNAME = 'site-data';
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const MAX_SEGMENT_LENGTH = 80;
 const MAX_FILENAME_LENGTH = 120; // leaves room for a hash suffix and ".html"
@@ -112,6 +123,60 @@ function flatFileName(url) {
 }
 
 /**
+ * Nested relative path (directories included) for a page URL, mirroring the
+ * site's own structure under site-data/.
+ *
+ * Pure function, like flatFileName: the same URL always yields the same path.
+ * A trailing slash names a directory, whose document is its index - the same
+ * rule the site's own routing uses, so /docs/ and /docs/index land together
+ * rather than /docs/ silently becoming a file named after nothing.
+ *
+ * The extension is a parameter rather than baked in, so a page's .html and .md
+ * are guaranteed to differ in nothing but that suffix.
+ */
+function nestedFileName(url, extension = '.html') {
+  const u = new URL(url);
+  const segments = u.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => sanitizeSegment(decodeSafe(segment)));
+
+  let directories;
+  let base;
+  if (segments.length === 0) {
+    directories = [];
+    base = 'index';
+  } else if (u.pathname.endsWith('/')) {
+    directories = segments;
+    base = 'index';
+  } else {
+    directories = segments.slice(0, -1);
+    // Only the last segment carries an extension worth dropping, and dropping
+    // it is what keeps /about and /about.html from becoming two files.
+    base = segments[segments.length - 1].replace(/\.(html?|xhtml)$/i, '') || 'index';
+  }
+
+  let name = `${base}${querySuffix(u.search)}`;
+  if (name.length > MAX_FILENAME_LENGTH) {
+    name = `${name.slice(0, MAX_FILENAME_LENGTH)}-${shortHash(url)}`;
+  }
+  return path.join(...directories, `${name}${extension}`);
+}
+
+/**
+ * The Markdown sibling of a page path handed out for HTML.
+ *
+ * Deliberately a suffix swap rather than a second trip through the naming
+ * rules: a collision resolved by FlatNames put a hash in the HTML name, and
+ * only a swap carries that same hash onto the Markdown file. Re-deriving it
+ * would hand the .md the *unhashed* name and quietly let two pages overwrite
+ * each other's Markdown while their HTML stayed correctly separate.
+ */
+function markdownSibling(pagePath) {
+  return pagePath.replace(/\.html$/i, '') + '.md';
+}
+
+/**
  * Flat filename for a downloaded asset, keeping its real extension so the file
  * still opens in the reader's PDF viewer or spreadsheet app.
  *
@@ -138,16 +203,32 @@ function reportDir(siteDirectory) {
   return path.join(siteDirectory, 'report');
 }
 
-function rawHtmlDir(siteDirectory) {
-  return path.join(siteDirectory, 'raw-html');
+/**
+ * Directory holding the archived pages.
+ *
+ * Named site-data/ because it now holds two formats, not one: raw-html/ told
+ * the reader the directory was HTML, which stopped being true the moment
+ * --format grew a Markdown option.
+ */
+function siteDataDir(siteDirectory) {
+  return path.join(siteDirectory, SITE_DATA_DIRNAME);
 }
 
 function assetsDir(siteDirectory) {
   return path.join(siteDirectory, 'assets');
 }
 
-/** Relative path from a file in raw-html/ to the assets/ directory. */
-const ASSETS_RELATIVE_FROM_RAW_HTML = '../assets';
+/**
+ * Relative path from a page in site-data/ to the assets/ directory.
+ *
+ * Depth-dependent now that pages nest: site-data/blog/post.html has to climb
+ * two levels, site-data/index.html only one. `pagePath` is the page's path
+ * relative to site-data/, exactly what FlatNames hands out.
+ */
+function assetsRelativeFrom(pagePath) {
+  const depth = pagePath.split(/[\\/]/).length - 1;
+  return `${'../'.repeat(depth + 1)}assets`;
+}
 
 /**
  * Hands out unique flat filenames within one flat directory.
@@ -178,9 +259,14 @@ class FlatNames {
       // Distinct URLs flattened onto one name: disambiguate deterministically.
       // An asset URL can legitimately produce a name with no extension at all,
       // so the split point has to survive lastIndexOf returning -1.
-      const dot = preferred.lastIndexOf('.');
-      const stem = dot > 0 ? preferred.slice(0, dot) : preferred;
-      const suffix = dot > 0 ? preferred.slice(dot) : '';
+      // Only a dot in the *last* segment is an extension: site-data holds
+      // paths, and a directory called "v1.2" would otherwise be split through
+      // the middle, turning v1.2/post.html into v1-<hash>.2/post.html.
+      const lastSeparator = Math.max(preferred.lastIndexOf('/'), preferred.lastIndexOf('\\'));
+      const dot = preferred.indexOf('.', lastSeparator + 1);
+      const splitAt = dot > lastSeparator + 1 ? dot : -1;
+      const stem = splitAt > 0 ? preferred.slice(0, splitAt) : preferred;
+      const suffix = splitAt > 0 ? preferred.slice(splitAt) : '';
       name = `${stem}-${shortHash(url)}${suffix}`;
       let counter = 2;
       while (this._byName.has(name) && this._byName.get(name) !== url) {
@@ -192,11 +278,23 @@ class FlatNames {
     return name;
   }
 
-  /** Re-adopt names from a resumed crawl so they are never reissued. */
-  restore(pairs) {
+  /**
+   * Re-adopt names from a resumed crawl so they are never reissued.
+   *
+   * `pairs` carry `file` as a path relative to the *site* directory, so the
+   * leading directory has to come off to get back to the name this instance
+   * handed out. `toName` does that; the default suits the flat directories,
+   * where the name is simply the basename.
+   *
+   * Getting this wrong is silent: blog/post.html and docs/post.html both
+   * reduce to "post.html" under a basename rule, so a resumed crawl would
+   * think they had collided and start hashing names that were already fine.
+   */
+  restore(pairs, toName = (file) => path.basename(file)) {
     for (const { url, file } of pairs) {
       if (!url || !file) continue;
-      const name = path.basename(file);
+      const name = toName(file);
+      if (!name) continue;
       this._byUrl.set(url, name);
       this._byName.set(name, url);
     }
@@ -205,13 +303,16 @@ class FlatNames {
 
 module.exports = {
   flatFileName,
+  nestedFileName,
+  markdownSibling,
   flatAssetName,
   sanitizeSegment,
   hostSegment,
   siteDir,
   reportDir,
-  rawHtmlDir,
+  siteDataDir,
   assetsDir,
-  ASSETS_RELATIVE_FROM_RAW_HTML,
+  SITE_DATA_DIRNAME,
+  assetsRelativeFrom,
   FlatNames,
 };

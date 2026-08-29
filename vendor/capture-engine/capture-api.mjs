@@ -60,6 +60,12 @@ const STATE_PROCESSED = "processed";
 
 const { readTextFile, writeTextFile, writeFile, stdout, mkdir, stat, errors } = Deno;
 let tasks = [], maxParallelWorkers, sessionFilename;
+// web-archiver: rendered DOM per URL, for the caller that asked for it. Held
+// here rather than returned through capture(), whose per-task options are
+// JSON-cloned and so cannot carry a callback. Drained per batch by
+// takeRenderedDoms() - a page's DOM is a few hundred KB, and holding a whole
+// crawl's worth would repeat the leak the tasks list was already fixed for.
+let renderedDoms = new Map();
 
 export { initialize };
 
@@ -95,7 +101,14 @@ async function initialize(options) {
 	}
 	return {
 		capture: urls => capture(urls, options),
-		finish: () => finish(options)
+		finish: () => finish(options),
+		// web-archiver: hands over everything collected since the last call and
+		// forgets it, so the map never outgrows one batch.
+		takeRenderedDoms: () => {
+			const collected = renderedDoms;
+			renderedDoms = new Map();
+			return collected;
+		}
 	};
 }
 
@@ -274,6 +287,17 @@ async function capturePage(options) {
 		let filename, content;
 		options.zipScript = getZipScriptSource();
 		const pageData = await backend.getPageData(options);
+		// web-archiver: keyed by the URL as the caller asked for it, which is
+		// what the crawler matches its jobs against.
+		if (pageData.renderedDom) {
+			renderedDoms.set(options.url, pageData.renderedDom);
+			pageData.renderedDom = undefined;
+		}
+		// Nothing was captured, so there is nothing to name or write; the file
+		// this page produces, if any, is the caller's to write from the DOM.
+		if (options.renderedDomOnly) {
+			return pageData;
+		}
 		content = pageData.content;
 		if (options.consoleMessagesFile && pageData.consoleMessages) {
 			await writeTextFile(options.consoleMessagesFile, JSON.stringify(pageData.consoleMessages, null, 2));

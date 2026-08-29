@@ -128,6 +128,11 @@ function emitShow(crawl) {
     base: crawl.base,
     // 1 when a previous crawl-report.json supplied the settings below.
     optionsFound: crawl.options ? 1 : 0,
+    // What the archive already holds. Resuming into a different format would
+    // leave one directory half HTML and half Markdown, so the runners carry
+    // this over rather than re-asking it.
+    format: o.format || 'html',
+    nativeMarkdown: o.nativeMarkdown === false ? 0 : 1,
     maxPages: o.maxPages ?? 100,
     maxDepth: o.maxDepth ?? 3,
     // Only the first pattern is offered as a prompt default; the counts let the

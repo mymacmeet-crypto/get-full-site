@@ -111,6 +111,7 @@ function buildConfig(startUrl, cliOptions) {
   const env = process.env;
 
   const outputFolder = path.resolve(cliOptions.output || env.OUTPUT_FOLDER || './archive');
+  const format = cliOptions.format || 'html';
 
   // `--assets` accepts group names, bare extensions, "all" and "none"; the
   // default is documents, the group whose loss the HTML archive cannot make up
@@ -164,6 +165,16 @@ function buildConfig(startUrl, cliOptions) {
     // and omitting both leaves undefined (= enabled, auto-discover).
     sitemapEnabled: cliOptions.sitemap !== false,
     sitemapUrl: typeof cliOptions.sitemap === 'string' ? cliOptions.sitemap : null,
+
+    // ---- Output format ----------------------------------------------------
+    // 'html' | 'md' | 'both'. Commander has already rejected anything else.
+    format,
+    wantsHtml: format === 'html' || format === 'both',
+    wantsMarkdown: format === 'md' || format === 'both',
+    // Try the site's own <page>.md before converting anything ourselves.
+    // --no-native-md turns it off, for a corpus where every document should
+    // have been through the same conversion.
+    nativeMarkdown: cliOptions.nativeMd !== false,
 
     overwrite: Boolean(cliOptions.overwrite),
     resume: Boolean(cliOptions.resume),

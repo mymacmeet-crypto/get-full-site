@@ -61,6 +61,11 @@ function createProgram() {
       '--include-noindex',
       'collect pages the index marks "noindex" too (they are skipped by default)'
     )
+    .option(
+      '--raw-blocks',
+      'keep the authoring scaffolding a site serves in its .md - the +---+ ' +
+        'block tables, the Metadata blocks - instead of parsing it away'
+    )
     .option('--force', 're-fetch every document, ignoring lastModified')
     .option('-c, --concurrency <n>', 'parallel document fetches', '6')
     .option('--delay <ms>', 'minimum delay between requests', '100')
@@ -113,6 +118,10 @@ function buildConfig(siteUrl, options) {
     includePatterns: compilePatterns(options.include, '--include'),
     excludePatterns: compilePatterns(options.exclude, '--exclude'),
     includeNoIndex: Boolean(options.includeNoindex ?? options.includeNoIndex),
+    // Parse the Edge Delivery block syntax into what it means: data tables
+    // become tables, wrapper blocks unwrap, Metadata is lifted out. See
+    // src/eds-markdown.js for why deleting it wholesale is the wrong fix.
+    cleanBlocks: options.rawBlocks !== true,
     force: Boolean(options.force),
     dryRun: Boolean(options.dryRun),
     concurrency: positiveInt(options.concurrency, '--concurrency', { min: 1 }),

@@ -102,6 +102,12 @@ async function getPageData(options) {
 		await setupBindings(cdp, contextId, pageContext);
 		await capturePageData(cdp, contextId, pageContext);
 		await disableCdpDomains(cdp, pageContext);
+		// web-archiver: under renderedDomOnly the capture script was never run,
+		// so the binding that resolves pageDataPromise is never called and
+		// awaiting it would hang forever. The rendered DOM is the whole result.
+		if (options.renderedDomOnly) {
+			return finalizeRenderedDom(pageContext);
+		}
 		return await finalizePageData(pageDataPromise, pageContext);
 	} catch (error) {
 		if (shouldRetryWithFallback(error)) {
@@ -631,7 +637,9 @@ async function callBrowserFunction({ Runtime }, contextId, functionName, args) {
 	});
 }
 
-async function capturePageData({ Runtime }, contextId, { options, debugMessages }) {
+async function capturePageData(cdp, contextId, pageContext) {
+	const { Runtime } = cdp;
+	const { options, debugMessages } = pageContext;
 	const CAPTURE_TIMEOUT_ERROR_MESSAGE = "Capture timeout";
 	const ERROR_SUBTYPE = "error";
 	const captureTimeoutAbortController = new AbortController();
@@ -639,6 +647,18 @@ async function capturePageData({ Runtime }, contextId, { options, debugMessages 
 	if (options.browserWaitDelay) {
 		logData([`Waiting ${options.browserWaitDelay} ms`], { options, debugMessages });
 		await new Promise(resolve => setTimeout(resolve, options.browserWaitDelay));
+	}
+	// web-archiver: the page is settled and any injected pass (the reveal
+	// scroll) has run, but nothing has been inlined yet - so this is the one
+	// moment the DOM holds the fully rendered page with its *original* asset
+	// URLs. Read after the capture below and every image is a base64 data:
+	// URI; read before browserWaitDelay and JavaScript-rendered content is
+	// missing. It is the source the Markdown conversion works from.
+	if (options.saveRenderedDom || options.renderedDomOnly) {
+		pageContext.renderedDom = await getRenderedDom(cdp, contextId, pageContext);
+	}
+	if (options.renderedDomOnly) {
+		return;
 	}
 	try {
 		logData(["Capturing page"], { options, debugMessages });
@@ -668,6 +688,40 @@ async function capturePageData({ Runtime }, contextId, { options, debugMessages 
 	}
 }
 
+/**
+ * web-archiver: the rendered page as HTML, read from the live DOM.
+ *
+ * A failure here must not cost the capture: HTML mode does not need this at
+ * all, and "both" mode would rather have the archived page with no Markdown
+ * than neither.
+ */
+async function getRenderedDom({ Runtime }, contextId, { options, debugMessages }) {
+	try {
+		logData(["Reading rendered DOM"], { options, debugMessages });
+		const { result } = await Runtime.evaluate({
+			expression: "document.documentElement.outerHTML",
+			returnByValue: true,
+			contextId
+		});
+		return typeof result.value === "string" ? result.value : null;
+	} catch (error) {
+		logData(["Could not read rendered DOM", error.message], { options, debugMessages });
+		return null;
+	}
+}
+
+/** web-archiver: the pageData shape for a run that captured nothing else. */
+function finalizeRenderedDom({ options, consoleMessages, debugMessages, httpInfo, renderedDom }) {
+	const pageData = Object.assign({ renderedDom: renderedDom || null }, httpInfo);
+	if (options.consoleMessagesFile) {
+		pageData.consoleMessages = consoleMessages;
+	}
+	if (options.debugMessagesFile) {
+		pageData.debugMessages = debugMessages;
+	}
+	return pageData;
+}
+
 async function disableCdpDomains({ Console, Fetch, Network, Page, Runtime }, { options }) {
 	// disabled first, so that the requests left paused are resumed by the
 	// browser instead of being held until the target is closed
@@ -682,9 +736,15 @@ async function disableCdpDomains({ Console, Fetch, Network, Page, Runtime }, { o
 	}
 }
 
-async function finalizePageData(pageDataPromise, { options, consoleMessages, debugMessages, httpInfo }) {
+async function finalizePageData(pageDataPromise, pageContext) {
+	const { options, consoleMessages, debugMessages, httpInfo } = pageContext;
 	const pageData = await pageDataPromise;
 	logData(["Returning page data"], { options, debugMessages });
+	// web-archiver: carried out beside the captured content, for the caller
+	// that wants both the archived HTML and the DOM it was made from.
+	if (pageContext.renderedDom !== undefined) {
+		pageData.renderedDom = pageContext.renderedDom;
+	}
 	if (options.consoleMessagesFile) {
 		pageData.consoleMessages = consoleMessages;
 	}

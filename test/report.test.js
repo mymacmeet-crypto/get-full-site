@@ -166,7 +166,7 @@ test('the sitemap lists file URLs alongside page URLs', () => {
   assert.ok(xml.includes('<loc>https://ontheline.trincoll.edu/</loc>'), 'page URL');
   assert.ok(xml.includes(`<loc>${PDF}</loc>`), 'file URL');
   assert.ok(xml.includes(`<!-- ${PDF_FILE} -->`), 'names the local copy');
-  assert.ok(xml.includes('<!-- 1 page(s) in raw-html/ -->'));
+  assert.ok(xml.includes('<!-- 1 page(s) in site-data/ -->'));
   assert.ok(xml.includes('<!-- 2 downloaded file(s) in assets/ -->'));
   assert.ok(xml.indexOf('raw-html/index.html') < xml.indexOf(PDF_FILE), 'pages first');
 });
@@ -207,7 +207,7 @@ test('files alone are enough to earn a sitemap', () => {
   report.recordAsset({ url: PDF, file: PDF_FILE, bytes: 10, duplicateOf: null });
   const xml = fs.readFileSync(report.writeArchiveSitemap(report.build(1), tmpdir()), 'utf8');
   assert.ok(xml.includes(`<loc>${PDF}</loc>`));
-  assert.ok(!xml.includes('page(s) in raw-html/'));
+  assert.ok(!xml.includes('page(s) in site-data/'));
 });
 
 // --------------------------------------------------------------------------

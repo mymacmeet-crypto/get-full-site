@@ -186,26 +186,53 @@ class Archiver {
   }
 
   /**
+   * What the engine is asked to do with one page.
+   *
+   * 'html'  archive it, and nothing else.
+   * 'both'  archive it and hand back the rendered DOM as well.
+   * 'dom'   hand back the rendered DOM and archive nothing - no inlining, no
+   *         serialization, no file. This is what --format md costs on a site
+   *         that publishes no Markdown of its own.
+   *
+   * These ride on the per-page options rather than the engine's, so one batch
+   * can mix them: on a site serving its own Markdown for some paths and not
+   * others, only the pages that need converting pay for a DOM.
+   */
+  static engineOptions(job) {
+    switch (job.mode) {
+      case 'dom':
+        return { renderedDomOnly: true };
+      case 'both':
+        return { output: job.filePath, saveRenderedDom: true };
+      default:
+        return { output: job.filePath };
+    }
+  }
+
+  /**
    * Archive a batch of pages through the shared browser.
    *
-   * `jobs` is [{ url, filePath }]. Resolves with one result per job:
-   * { url, filePath, ok, error? } - never rejects, so a single bad page can
-   * never abort the crawl. A page counts as archived only when its file
-   * actually exists: the engine reports failures out-of-band and does not
-   * reject the capture call.
+   * `jobs` is [{ url, filePath, mode }]. Resolves with one result per job:
+   * { url, filePath, ok, error?, renderedDom? } - never rejects, so a single
+   * bad page can never abort the crawl. A page counts as archived only when
+   * its file actually exists: the engine reports failures out-of-band and does
+   * not reject the capture call.
    */
   async archiveBatch(jobs) {
     if (jobs.length === 0) return [];
     const engine = await this._ensureStarted();
 
     for (const job of jobs) {
-      await fs.promises.mkdir(path.dirname(job.filePath), { recursive: true });
+      // A 'dom' job writes no file, so it needs no directory.
+      if (job.mode !== 'dom') {
+        await fs.promises.mkdir(path.dirname(job.filePath), { recursive: true });
+      }
     }
 
     let captureError = null;
     const startedAt = Date.now();
     try {
-      await engine.capture(jobs.map((job) => [job.url, { output: job.filePath }]));
+      await engine.capture(jobs.map((job) => [job.url, Archiver.engineOptions(job)]));
     } catch (error) {
       // A whole-batch failure (e.g. the browser died) still has to be reported
       // per page rather than thrown away.
@@ -213,8 +240,24 @@ class Archiver {
     }
     const batchMs = Date.now() - startedAt;
 
+    const renderedDoms = engine.takeRenderedDoms ? engine.takeRenderedDoms() : new Map();
     const errors = this._errorsByUrl(this._readNewErrors());
     const results = jobs.map((job) => {
+      const renderedDom = renderedDoms.get(job.url) || null;
+
+      // A DOM-only page has no file to look for; the DOM is the whole result.
+      if (job.mode === 'dom') {
+        if (renderedDom) {
+          return { url: job.url, filePath: null, ok: true, renderedDom };
+        }
+        return {
+          url: job.url,
+          filePath: null,
+          ok: false,
+          error: errors.get(job.url) || captureError || 'browser returned no rendered DOM',
+        };
+      }
+
       let exists = false;
       let size = 0;
       try {
@@ -225,7 +268,7 @@ class Archiver {
         exists = false;
       }
       if (exists && size > 0) {
-        return { url: job.url, filePath: job.filePath, ok: true };
+        return { url: job.url, filePath: job.filePath, ok: true, renderedDom };
       }
       return {
         url: job.url,

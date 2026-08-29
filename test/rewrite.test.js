@@ -129,3 +129,34 @@ test('several links in one document are all rewritten, in order', () => {
   assert.ok(html.includes('<p>text</p>'), 'untouched markup between matches is preserved');
   assert.equal(html.match(/\.\.\/assets\//g).length, 3);
 });
+
+test('a nested page climbs the right number of levels to reach assets/', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { rewriteFile } = require('../src/rewrite');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rewrite-depth-'));
+  try {
+    // Pages nest under site-data/ now, so a fixed "../assets" would point a
+    // page two levels down at a directory that is not there.
+    const cases = [
+      { pageFile: 'index.html', expected: '../assets/' },
+      { pageFile: path.join('blog', 'post.html'), expected: '../../assets/' },
+      { pageFile: path.join('a', 'b', 'c', 'index.html'), expected: '../../../../assets/' },
+    ];
+    for (const [index, { pageFile, expected }] of cases.entries()) {
+      const file = path.join(dir, `page-${index}.html`);
+      fs.writeFileSync(file, `<a href="${PDF}">Sample</a>`);
+      const count = await rewriteFile(file, {
+        pageUrl: PAGE,
+        pageFile,
+        assetsByUrl: assets(),
+      });
+      assert.equal(count, 1);
+      assert.match(fs.readFileSync(file, 'utf8'), new RegExp(expected.replace(/\./g, '\.')));
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

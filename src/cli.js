@@ -14,13 +14,31 @@ function createProgram() {
   program
     .name('web-archiver')
     .description(
-      'Crawl one domain and archive the selected pages as standalone HTML files.\n' +
-        'Each site gets <output>/<host>/ with report/, raw-html/ and, once the crawl\n' +
-        'downloads a linked file, assets/. raw-html/ and assets/ are flat - one file\n' +
-        'per page or download, no nested directories.'
+      'Crawl one domain and archive the selected pages as HTML, Markdown or both.\n' +
+        'Each site gets <output>/<host>/ with report/, site-data/ and, once the crawl\n' +
+        "downloads a linked file, assets/. site-data/ mirrors the site's own paths -\n" +
+        '/blog/post-1 is site-data/blog/post-1.html beside post-1.md - while assets/\n' +
+        'stays flat, one file per download.'
     )
     .version(pkg.version)
     .argument('<url>', 'start URL of the site to archive')
+    .addOption(
+      new Option(
+        '-f, --format <format>',
+        'what to save for each page: "html" (standalone capture, every asset ' +
+          'inlined), "md" (Markdown only), or "both". Markdown comes from the ' +
+          "site's own <page>.md where it publishes one, and is converted from " +
+          'the rendered page where it does not'
+      )
+        .choices(['html', 'md', 'both'])
+        .default('html')
+    )
+    .option(
+      '--no-native-md',
+      'always convert pages to Markdown, even on a site that publishes its own ' +
+        '<page>.md - use it when every document should have been through the ' +
+        'same conversion'
+    )
     .option(
       '-d, --depth <n>',
       'maximum link depth from seed pages (0 = seeds only: start URL + sitemap URLs)',
@@ -78,7 +96,7 @@ function createProgram() {
     .option(
       '--no-rewrite-links',
       'leave links in the saved HTML pointing at the live site instead of the ' +
-        'downloaded copies in assets/'
+        'downloaded copies in assets/ (Markdown always keeps live URLs)'
     )
     .option(
       '--no-original-href',
@@ -110,7 +128,7 @@ function createProgram() {
       []
     )
 
-    .option('--overwrite', 'overwrite files that already exist in raw-html/ and assets/')
+    .option('--overwrite', 'overwrite files that already exist in site-data/ and assets/')
     .option('--resume', 'resume an interrupted crawl of the same start URL')
     .option('--respect-robots', 'honor robots.txt disallow rules (off by default)')
     .option('--dry-run', 'crawl and report without archiving any pages')

@@ -7,6 +7,7 @@ const { RateLimiter } = require('../rateLimiter');
 const { Logger } = require('../logger');
 const { mapWithConcurrency, formatBytes, formatDuration } = require('../utils/misc');
 const { fetchIndex, fetchDocument } = require('./source');
+const { cleanEdsMarkdown } = require('../eds-markdown');
 const {
   DATASET_FILENAME,
   MANIFEST_FILENAME,
@@ -196,13 +197,31 @@ async function collect(config) {
       logger.warn(`empty: ${item.row.path}`);
       return;
     }
+    // What the site serves at <path>.md is the authoring document: the
+    // author's prose wrapped in the block syntax the authoring tools use.
+    // Across www.aem.live's 183 documents that scaffolding was 30.8% of every
+    // line - tokens a retrieval corpus pays for and can never match on.
+    // Title, description and URL are already fields of the record, so no front
+    // matter is added here; it would only be embedded twice.
+    const isMarkdown = config.extension === '.md';
+    const text =
+      isMarkdown && config.cleanBlocks !== false
+        ? cleanEdsMarkdown(result.text, { frontMatter: false }).markdown
+        : result.text;
+
+    if (!text.trim()) {
+      failed.push({ path: item.row.path, url: result.url, error: 'no content outside the blocks' });
+      logger.warn(`empty after cleaning: ${item.row.path}`);
+      return;
+    }
+
     const record = buildRecord({
       row: item.row,
       origin,
-      text: result.text,
+      text,
       sourceUrl: result.url,
       fetchedAt,
-      format: config.extension === '.md' ? 'markdown' : 'html',
+      format: isMarkdown ? 'markdown' : 'html',
     });
     fetched.push(record);
     logger.debug(

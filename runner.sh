@@ -83,6 +83,23 @@ ask_int() {
   done
 }
 
+# ask_format <var> <default> - html, md or both. Re-asks rather than passing a
+# typo to the CLI, which would fail only after the whole wizard was filled in.
+ask_format() {
+  local __fmt_var=$1 __fmt_default=$2 __fmt_val=""
+  while true; do
+    ask __fmt_val "Save each page as (html/md/both)" "$__fmt_default"
+    __fmt_val=$(printf '%s' "$__fmt_val" | tr '[:upper:]' '[:lower:]')
+    case $__fmt_val in
+      html|md|both)
+        printf -v "$__fmt_var" '%s' "$__fmt_val"
+        return
+        ;;
+    esac
+    bad "html, md or both please, got \"${__fmt_val}\""
+  done
+}
+
 # ask_yn <var> <label> <default y|n> - sets the var to "yes" or "no".
 ask_yn() {
   local __yn_var=$1 __yn_label=$2 __yn_default=$3 __yn_in
@@ -329,6 +346,15 @@ resume_wizard() {
 
   ARGS=("$URL" --max-pages "$pages" --depth "$depth" --output "$OUTPUT" --resume)
 
+  # Carried, never re-asked: the archive already holds one format, and resuming
+  # into another would leave it half HTML and half Markdown. Added here rather
+  # than with the other carried flags because those are skipped when the
+  # advanced wizard runs, and this must survive that branch too.
+  local prev_format=${PREV[format]:-html}
+  [[ $prev_format != html ]] && ARGS+=(--format "$prev_format")
+  [[ ${PREV[nativeMarkdown]:-1} == 0 ]] && ARGS+=(--no-native-md)
+  record "Format" "$prev_format"
+
   section "Advanced"
   printf "  %sthe previous run's filters and tuning are kept unless you change them%s\n\n" "$GREY" "$R"
   local change
@@ -364,10 +390,19 @@ wizard() {
   ask OUTPUT "Output folder" "$(default_output)"
   record "Output" "$OUTPUT"
 
+  printf '\n'
+  printf '  %shtml keeps every asset inlined, so a page opens offline exactly as it%s\n' "$GREY" "$R"
+  printf '  %slooked. md is the text alone - far smaller, and what a search index or%s\n' "$GREY" "$R"
+  printf '  %sa model wants. both writes blog.html and blog.md side by side.%s\n' "$GREY" "$R"
+  local FORMAT
+  ask_format FORMAT "$(prior format html)"
+  record "Format" "$FORMAT"
+
   ask_yn DRY_RUN "Dry run (crawl and report, archive nothing)?" n
   record "Mode" "$([[ $DRY_RUN == yes ]] && echo 'dry run' || echo 'archive')"
 
   ARGS=("$URL" --max-pages "$PAGES" --depth "$DEPTH" --output "$OUTPUT")
+  [[ $FORMAT != html ]] && ARGS+=(--format "$FORMAT")
   add_flag --dry-run "$DRY_RUN"
 
   section "Linked files"
@@ -479,7 +514,7 @@ wizard_advanced() {
   # --resume is already set by the resume flow, so it is not asked there.
   resume=no
   [[ $IS_RESUME == yes ]] || ask_yn resume "Resume a previous interrupted crawl?" n
-  ask_yn overwrite   "Overwrite files already in raw-html/ and assets/?" n
+  ask_yn overwrite   "Overwrite files already in site-data/ and assets/?" n
   ask_yn robots      "Respect robots.txt disallow rules?" "$(prior_yn respectRobots)"
   ask_yn all_domains "Follow links to external domains?" "$(prior_yn allDomains)"
   ask_yn verbose     "Verbose logging?" n
@@ -562,7 +597,7 @@ execute() {
       printf '%s  ✓ Finished%s %sin %s%s\n' "$GREEN$B" "$R" "$GREY" "$took" "$R"
       local host=${URL#*://}; host=${host%%/*}
       local site="${OUTPUT:-./archive}/${host}"
-      printf '  %sPages%s   %s/raw-html/\n' "$GREY" "$R" "$site"
+      printf '  %sPages%s   %s/site-data/\n' "$GREY" "$R" "$site"
       # assets/ only exists when the crawl actually downloaded something.
       [[ -d "$site/assets" ]] && printf '  %sFiles%s   %s/assets/\n' "$GREY" "$R" "$site"
       printf '  %sReport%s  %s/report/crawl-report.json\n' "$GREY" "$R" "$site"

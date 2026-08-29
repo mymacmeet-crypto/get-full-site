@@ -102,6 +102,16 @@ function Read-Int ([string]$Label, [int]$Default, [int]$Min = 0) {
     }
 }
 
+# html / md / both. Re-asks rather than passing a typo to the CLI, which would
+# fail only after the whole wizard had been filled in.
+function Read-Format ([string]$Default) {
+    while ($true) {
+        $answer = (Read-Text 'Save each page as (html/md/both)' $Default).Trim().ToLower()
+        if ($answer -in @('html', 'md', 'both')) { return $answer }
+        Write-Warn "html, md or both please, got '$answer'"
+    }
+}
+
 function Read-YesNo ([string]$Label, [string]$Default) {
     $hint = if ($Default -eq 'y') { 'Y/n' } else { 'y/N' }
     while ($true) {
@@ -315,6 +325,15 @@ function Invoke-ResumeWizard ([string]$Base) {
 
     Add-Arg $script:Url '--max-pages' $pages '--depth' $depth '--output' $script:Output '--resume'
 
+    # Carried, never re-asked: the archive already holds one format, and
+    # resuming into another would leave it half HTML and half Markdown. Added
+    # here rather than with the other carried flags because those are skipped
+    # when the advanced wizard runs, and this must survive that branch too.
+    $prevFormat = if ($prev['format']) { $prev['format'] } else { 'html' }
+    if ($prevFormat -ne 'html') { Add-Arg '--format' $prevFormat }
+    if ($prev['nativeMarkdown'] -eq '0') { Add-Arg '--no-native-md' }
+    $script:Summary['Format'] = $prevFormat
+
     Write-Section 'Advanced'
     Write-Host "  $($C.Grey)the previous run's filters and tuning are kept unless you change them$($C.R)"
     Write-Host ''
@@ -344,6 +363,14 @@ function Invoke-Wizard {
     $depth = Read-Int 'Link depth from the seeds (0 = seeds only)' 3 0
 
     $script:Output = Read-Text 'Output folder' (Get-DefaultOutput)
+
+    Write-Host ''
+    Write-Host "  $($C.Grey)html keeps every asset inlined, so a page opens offline exactly as it$($C.R)"
+    Write-Host "  $($C.Grey)looked. md is the text alone - far smaller, and what a search index or$($C.R)"
+    Write-Host "  $($C.Grey)a model wants. both writes blog.html and blog.md side by side.$($C.R)"
+    $format = Read-Format (Prior 'format' 'html')
+    if ($format -ne 'html') { Add-Arg '--format' $format }
+    $script:Summary['Format'] = $format
 
     $dryRun = Read-YesNo 'Dry run (crawl and report, archive nothing)?' 'n'
 
@@ -458,7 +485,7 @@ function Invoke-WizardAdvanced ([hashtable]$Defaults = @{}, [switch]$IsResume) {
     if (-not $IsResume) {
         $toggles['--resume'] = Read-YesNo 'Resume a previous interrupted crawl?' 'n'
     }
-    $toggles['--overwrite']      = Read-YesNo 'Overwrite files already in raw-html/ and assets/?' 'n'
+    $toggles['--overwrite']      = Read-YesNo 'Overwrite files already in site-data/ and assets/?' 'n'
     $toggles['--respect-robots'] = Read-YesNo 'Respect robots.txt disallow rules?' (& $yn (Prior 'respectRobots' 0))
     $toggles['--all-domains']    = Read-YesNo 'Follow links to external domains?' (& $yn (Prior 'allDomains' 0))
     $toggles['--verbose']        = Read-YesNo 'Verbose logging?' 'n'
@@ -520,7 +547,7 @@ function Invoke-Archive {
             Write-Host "$($C.Green)$($C.B)  $([char]0x2713) Finished$($C.R) $($C.Grey)in $took$($C.R)"
             $host_ = ([uri]$script:Url).Host
             $site = Join-Path $script:Output $host_
-            Write-Host "  $($C.Grey)Pages$($C.R)   $site\raw-html\"
+            Write-Host "  $($C.Grey)Pages$($C.R)   $site\site-data\"
             # assets\ only exists when the crawl actually downloaded something.
             if (Test-Path (Join-Path $site 'assets')) {
                 Write-Host "  $($C.Grey)Files$($C.R)   $site\assets\"

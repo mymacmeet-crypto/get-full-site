@@ -157,8 +157,10 @@ function readManifest(file) {
  * The site's own folder structure is mirrored rather than flattened, because
  * the whole point of keeping the files is to read and grep them: `/developer/x`
  * becomes `developer/x.md`, so the corpus browses the way the site does.
- * (raw-html/ in the archiver is flat instead - different job, different rule:
- * there the filename has to survive a URL with a query string in it.)
+ * (The archiver's site-data/ follows the same rule, so a corpus collected here
+ * and one crawled there browse identically. Its assets/ is flat instead -
+ * different job, different rule: a downloaded file is linked from pages at many
+ * depths, and one directory keeps that link the same from all of them.)
  *
  * A path ending in `/` is a directory index, so `/docs/` becomes
  * `docs/index.md`, and `/` becomes `index.md`.

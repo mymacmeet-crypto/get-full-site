@@ -3,7 +3,11 @@
 const fs = require('node:fs');
 
 const { normalizeUrl } = require('./utils/url');
-const { ASSETS_RELATIVE_FROM_RAW_HTML } = require('./utils/paths');
+const { assetsRelativeFrom } = require('./utils/paths');
+
+// A page sitting directly in site-data/, which is as far as a caller that
+// names no page can be assumed to be.
+const DEFAULT_ASSETS_PREFIX = '../assets';
 
 /**
  * Repoints links to downloaded files at the local copies, so an archived page
@@ -142,10 +146,14 @@ function rewriteAssetLinks(html, { pageUrl, assetsByUrl, keepOriginal = true, pr
  * being allowed to fail a page that was captured perfectly well.
  */
 async function rewriteFile(filePath, options) {
+  const { pageFile, ...rest } = options;
   const html = await fs.promises.readFile(filePath, 'utf8');
   const result = rewriteAssetLinks(html, {
-    prefix: ASSETS_RELATIVE_FROM_RAW_HTML,
-    ...options,
+    // Pages nest under site-data/, so how far one has to climb to reach
+    // assets/ depends on where it sits. `pageFile` is its path relative to
+    // site-data/; an explicit `prefix` in the options still wins.
+    prefix: pageFile ? assetsRelativeFrom(pageFile) : DEFAULT_ASSETS_PREFIX,
+    ...rest,
   });
   if (result.rewritten.length === 0) return 0;
   await fs.promises.writeFile(filePath, result.html);

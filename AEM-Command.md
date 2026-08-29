@@ -309,7 +309,7 @@ slash at the end, `/developer/`, keeps it out.
 
 | Folder or file | What is in it |
 |---|---|
-| `raw-html/` | 68 HTML files, one per page. Each opens offline with a double-click. |
+| `site-data/` | 68 files, one per page, nested to mirror the site's own paths. Each `.html` opens offline with a double-click; `--format md`/`both` puts a `.md` beside it. |
 | `assets/` | 3 linked text files. Links inside the saved pages point at them. |
 | `report/crawl-report.json` | The full record: totals, every skipped URL and why, and failures. |
 | `report/archive-index.json` | Which URL became which file. |
@@ -379,7 +379,7 @@ node bin/archive.js https://www.aem.live/ --survey
 
 ## Running it again
 
-Files already in `raw-html/` and `assets/` are not overwritten unless you add
+Files already in `site-data/` and `assets/` are not overwritten unless you add
 `--overwrite`. So a second run skips what is already saved. Two things to watch:
 
 - **Files from older crawls stay where they are.** They will not appear in

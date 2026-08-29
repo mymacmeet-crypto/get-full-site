@@ -182,6 +182,8 @@ class CrawlReport {
       finishedAt: finishedAt.toISOString(),
       durationMs: finishedAt - this.startedAt,
       options: {
+        format: this.config.format || 'html',
+        nativeMarkdown: this.config.nativeMarkdown !== false,
         maxDepth: this.config.maxDepth,
         maxPages: this.config.maxPages,
         sameDomainOnly: this.config.sameDomainOnly,
@@ -310,11 +312,18 @@ class CrawlReport {
   archiveEntries(report) {
     const entries = [];
     for (const page of report.downloadedPages) {
-      if (!page.file) continue;
+      // Under --format md there is no HTML file, and the Markdown is the whole
+      // archive of that page - skipping it here would leave the index and the
+      // sitemap empty for a run that saved two hundred documents.
+      const file = page.file || page.markdownFile;
+      if (!file) continue;
       entries.push({
         type: 'page',
         url: page.url,
-        file: page.file,
+        file,
+        htmlFile: page.file || null,
+        markdownFile: page.markdownFile || null,
+        markdownSource: page.markdownSource || null,
         bytes: page.bytes || 0,
         status: page.status ?? null,
         title: page.title || null,
@@ -359,8 +368,10 @@ class CrawlReport {
         `    <loc>${escapeXml(entry.url)}</loc>`,
         `    <lastmod>${lastmod}</lastmod>`,
         `    <!-- ${escapeXml(entry.file)}${
-          entry.duplicateOf ? ` (same file as ${escapeXml(entry.duplicateOf)})` : ''
-        } -->`,
+          entry.markdownFile && entry.markdownFile !== entry.file
+            ? ` + ${escapeXml(entry.markdownFile)}`
+            : ''
+        }${entry.duplicateOf ? ` (same file as ${escapeXml(entry.duplicateOf)})` : ''} -->`,
         '  </url>',
       ].join('\n');
 
@@ -372,7 +383,7 @@ class CrawlReport {
 
     const sections = [];
     if (pages.length > 0) {
-      sections.push(`  <!-- ${pages.length} page(s) in raw-html/ -->`);
+      sections.push(`  <!-- ${pages.length} page(s) in site-data/ -->`);
       sections.push(pages.map(renderUrl).join('\n'));
     }
     if (files.length > 0) {
@@ -620,6 +631,21 @@ class CrawlReport {
       }`,
       `  Failed:            ${t.failed}`,
     ];
+
+    // Only worth a line when Markdown was actually asked for; an HTML-only run
+    // should read exactly as it did before --format existed.
+    if (report.options.format && report.options.format !== 'html') {
+      const markdown = report.downloadedPages.filter((page) => page.markdownFile);
+      const fromSite = markdown.filter((page) => page.markdownSource === 'site').length;
+      const converted = markdown.length - fromSite;
+      const breakdown = [
+        fromSite ? `${fromSite} from the site` : null,
+        converted ? `${converted} converted` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      lines.push(`  Markdown written:  ${markdown.length}${breakdown ? ` (${breakdown})` : ''}`);
+    }
 
     if (report.options.assetMode !== 'off') {
       const byGroup = {};

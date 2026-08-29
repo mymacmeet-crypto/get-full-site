@@ -22,10 +22,41 @@ const {
   isSameDomain,
   groupForContentType,
 } = require('./utils/url');
-const { siteDir, reportDir, rawHtmlDir, assetsDir, FlatNames } = require('./utils/paths');
+const {
+  siteDir,
+  reportDir,
+  siteDataDir,
+  assetsDir,
+  nestedFileName,
+  markdownSibling,
+  SITE_DATA_DIRNAME,
+  FlatNames,
+} = require('./utils/paths');
+const { htmlToMarkdown } = require('./markdown');
+const { NativeMarkdown } = require('./native-md');
+const { cleanEdsMarkdown } = require('./eds-markdown');
 const { formatDuration, mapWithConcurrency } = require('./utils/misc');
 
 const STATE_SAVE_INTERVAL = 10; // pages between periodic state saves
+
+/** A report record's `file` (site-relative) as a site-data-relative path. */
+function siteDataRelative(file) {
+  return String(file || '').replace(new RegExp(`^${SITE_DATA_DIRNAME}/`), '');
+}
+
+/**
+ * The name a page was given on the run being resumed.
+ *
+ * Under --format md a record has no `file` at all, so the Markdown path is
+ * what carries the name; both formats share one, so swapping the extension
+ * recovers it. Without this a resumed Markdown-only crawl would hand out
+ * fresh names and rewrite files it already had.
+ */
+function restoredPageName({ file, markdownFile }) {
+  const stored = file || markdownFile;
+  if (!stored) return null;
+  return siteDataRelative(stored).replace(/\.md$/i, '.html');
+}
 
 /**
  * Crawl orchestrator, organised in waves rather than per-page workers:
@@ -55,14 +86,25 @@ class Crawler {
 
     this.siteDirectory = siteDir(this.startUrl, config.outputFolder);
     this.reportDirectory = reportDir(this.siteDirectory);
-    this.rawHtmlDirectory = rawHtmlDir(this.siteDirectory);
+    this.siteDataDirectory = siteDataDir(this.siteDirectory);
     this.assetsDirectory = assetsDir(this.siteDirectory);
 
     this.queue = new CrawlQueue();
     this.report = new CrawlReport(config);
     this.state = new CrawlState(this.reportDirectory);
     this.rateLimiter = new RateLimiter(config.delayMs);
-    this.names = new FlatNames();
+    // Page names are nested paths now, not bare filenames, so the collision
+    // handling works over `blog/post-1.html` rather than `blog-post-1.html`.
+    this.names = new FlatNames((url) => nestedFileName(url, '.html'));
+    // The site's own Markdown, asked for once per host. Shares the rate
+    // limiter: a .md request is a request to the same server as everything
+    // else, and the politeness budget is per site, not per pipeline.
+    this.nativeMd = config.wantsMarkdown
+      ? new NativeMarkdown(config, this.logger, { rateLimiter: this.rateLimiter })
+      : null;
+    // Stamped into the front matter of every document taken from the site, so
+    // a corpus says when it was collected without anyone consulting the report.
+    this.fetchedOn = new Date().toISOString().slice(0, 10);
     this.archiver = new Archiver(
       config,
       this.logger,
@@ -116,7 +158,7 @@ class Crawler {
     const startedAt = Date.now();
 
     fs.mkdirSync(this.reportDirectory, { recursive: true });
-    if (!config.dryRun) fs.mkdirSync(this.rawHtmlDirectory, { recursive: true });
+    if (!config.dryRun) fs.mkdirSync(this.siteDataDirectory, { recursive: true });
 
     await this._initializeFrontier();
 
@@ -353,10 +395,23 @@ class Crawler {
       return null;
     }
 
+    // One name per page, shared by both formats: blog/post-1.html and
+    // blog/post-1.md differ in nothing but the extension, so a reader who has
+    // one can find the other without consulting the report.
     const fileName = this.names.assign(effectiveUrl);
-    const filePath = path.join(this.rawHtmlDirectory, fileName);
+    const filePath = path.join(this.siteDataDirectory, fileName);
+    const markdownName = config.wantsMarkdown ? markdownSibling(fileName) : null;
+    const markdownPath = markdownName ? path.join(this.siteDataDirectory, markdownName) : null;
 
-    if (!config.overwrite && fs.existsSync(filePath)) {
+    // What this run still owes the page. A crawl that captured HTML last week
+    // and is asked for --format both today has the Markdown left to write, so
+    // "the file exists" is only a reason to skip when every requested format
+    // exists.
+    const needsHtml = config.wantsHtml && (config.overwrite || !fs.existsSync(filePath));
+    const needsMarkdown =
+      config.wantsMarkdown && (config.overwrite || !fs.existsSync(markdownPath));
+
+    if (!needsHtml && !needsMarkdown) {
       report.recordSkipped(url, 'file-exists');
       logger.info(`depth=${depth} exists, skipped: ${fileName}`);
       return null;
@@ -364,7 +419,23 @@ class Crawler {
 
     // The slot is reserved here so a wave can never overshoot --max-pages.
     this.processedCount++;
-    return { url: effectiveUrl, filePath, fileName, status: result.status, depth, title };
+    return {
+      url: effectiveUrl,
+      filePath,
+      fileName,
+      markdownPath,
+      markdownName,
+      needsHtml,
+      needsMarkdown,
+      // Set once the site has been asked for its own Markdown and had none:
+      // only then does the page need its DOM converting.
+      needsConversion: false,
+      markdown: null,
+      markdownSource: null,
+      status: result.status,
+      depth,
+      title,
+    };
   }
 
   /**
@@ -397,26 +468,63 @@ class Crawler {
     }
   }
 
-  /** Archive half of a wave: one SingleFile batch through the shared browser. */
+  /**
+   * What the browser is asked to do for one page.
+   *
+   * A page that needed only Markdown, and got it from the site, is not here at
+   * all - `_captureJobs` has already dropped it.
+   */
+  static _captureMode(job) {
+    if (!job.needsHtml) return 'dom';
+    return job.needsConversion ? 'both' : 'html';
+  }
+
+  /** The pages of a wave that still have to go through the browser. */
+  static _captureJobs(jobs) {
+    return jobs.filter((job) => job.needsHtml || job.needsConversion);
+  }
+
+  /**
+   * Archive half of a wave.
+   *
+   * Two sources feed it, and which ones a page uses is decided per page:
+   *
+   *   the site's own <page>.md   one HTTP request, no browser at all
+   *   the capture engine         the standalone HTML, the rendered DOM, or both
+   *
+   * The Markdown request goes first for exactly that reason: on an Edge
+   * Delivery site under --format md it answers for every page, and the browser
+   * is never launched.
+   */
   async _archiveJobs(jobs) {
     const { config, logger, report } = this;
 
+    await this._collectNativeMarkdown(jobs);
+
+    const captureJobs = Crawler._captureJobs(jobs);
     // SingleFile loads every page again in the browser, so the batch costs the
     // site one more visit per page and goes through the same politeness budget.
-    for (let i = 0; i < jobs.length; i++) await this.rateLimiter.acquire();
+    for (let i = 0; i < captureJobs.length; i++) await this.rateLimiter.acquire();
 
     const startedAt = Date.now();
     const results = await this.archiver.archiveBatch(
-      jobs.map((job) => ({ url: job.url, filePath: job.filePath }))
+      captureJobs.map((job) => ({
+        url: job.url,
+        filePath: job.filePath,
+        mode: Crawler._captureMode(job),
+      }))
     );
     const batchMs = Date.now() - startedAt;
-    const perPageMs = Math.round(batchMs / jobs.length);
+    const perPageMs = captureJobs.length ? Math.round(batchMs / captureJobs.length) : 0;
 
+    // Keyed rather than zipped: `jobs` and `results` no longer line up, since
+    // the pages served by the site's own Markdown never entered the batch.
+    const byUrl = new Map(results.map((result) => [result.url, result]));
     const linkMap = config.rewriteLinks ? this.assets.linkMap() : new Map();
 
-    for (const [index, result] of results.entries()) {
-      const job = jobs[index];
-      if (!result.ok) {
+    for (const job of jobs) {
+      const result = byUrl.get(job.url);
+      if (result && !result.ok) {
         // A failed page gives its budget slot back so --max-pages counts
         // pages actually archived.
         this.processedCount--;
@@ -426,17 +534,26 @@ class Crawler {
       }
 
       const assetOrder = this.assets.order;
-      const rewritten = await this._rewriteJobLinks(job, linkMap);
+      const wroteHtml = job.needsHtml && Boolean(result);
+      const rewritten = wroteHtml ? await this._rewriteJobLinks(job, linkMap) : 0;
+      const markdownFile = await this._writeMarkdown(job, result ? result.renderedDom : null);
 
       let bytes = 0;
-      try {
-        bytes = fs.statSync(job.filePath).size;
-      } catch {
-        /* size is informational only */
+      if (wroteHtml) {
+        try {
+          bytes = fs.statSync(job.filePath).size;
+        } catch {
+          /* size is informational only */
+        }
       }
       report.recordDownloaded({
         url: job.url,
-        file: path.relative(this.siteDirectory, job.filePath).replace(/\\/g, '/'),
+        // null under --format md: there is no HTML file, and claiming one
+        // would send every later pass - link rewriting included - looking for
+        // a file that was never written.
+        file: wroteHtml ? path.relative(this.siteDirectory, job.filePath).replace(/\\/g, '/') : null,
+        markdownFile,
+        markdownSource: markdownFile ? job.markdownSource : null,
         status: job.status,
         depth: job.depth,
         title: job.title,
@@ -449,14 +566,126 @@ class Crawler {
       });
       logger.info(
         `[${report.pages.length}/${config.maxPages}] depth=${job.depth} ${job.status} ` +
-          `${job.url} -> ${job.fileName} (${(bytes / 1024).toFixed(0)} KB` +
-          `${rewritten ? `, ${rewritten} link${rewritten === 1 ? '' : 's'} localised` : ''})`
+          `${job.url} -> ${this._describeOutputs(job, { wroteHtml, markdownFile, bytes })}` +
+          `${rewritten ? `, ${rewritten} link${rewritten === 1 ? '' : 's'} localised` : ''}`
       );
     }
 
-    logger.debug(
-      `Wave of ${jobs.length} archived in ${formatDuration(batchMs)} (~${perPageMs}ms/page)`
-    );
+    if (captureJobs.length) {
+      logger.debug(
+        `Wave of ${captureJobs.length} captured in ${formatDuration(batchMs)} ` +
+          `(~${perPageMs}ms/page)`
+      );
+    }
+  }
+
+  /** The "-> file (12 KB), file.md" tail of a per-page log line. */
+  _describeOutputs(job, { wroteHtml, markdownFile, bytes }) {
+    const parts = [];
+    if (wroteHtml) parts.push(`${job.fileName} (${(bytes / 1024).toFixed(0)} KB)`);
+    if (markdownFile) parts.push(`${job.markdownName} [${job.markdownSource}]`);
+    return parts.join(' + ') || '(nothing written)';
+  }
+
+  /**
+   * Ask the site for its own Markdown, for every page of the wave that wants
+   * Markdown at all.
+   *
+   * A page that gets it needs no conversion; a page that does not is marked
+   * for conversion, which is what puts it in front of the browser. On a site
+   * that publishes none, the probe inside NativeMarkdown settles after the
+   * first request and every later page falls straight through to conversion.
+   */
+  async _collectNativeMarkdown(jobs) {
+    const wanted = jobs.filter((job) => job.needsMarkdown);
+    if (wanted.length === 0) return;
+
+    if (!this.nativeMd || this.nativeMd.available === false) {
+      for (const job of wanted) job.needsConversion = true;
+      return;
+    }
+
+    await mapWithConcurrency(wanted, this.config.concurrency, async (job) => {
+      let published = null;
+      try {
+        published = await this.nativeMd.fetch(job.url);
+      } catch (error) {
+        // Never fatal: conversion is a complete answer to this failing.
+        this.logger.debug(`markdown lookup failed for ${job.url}: ${error.message}`);
+      }
+      if (!published) {
+        job.needsConversion = true;
+        return;
+      }
+
+      // What the site publishes is an authoring document, not a finished one:
+      // the prose is the author's own, but it arrives wrapped in the block
+      // syntax the authoring tools use. See src/eds-markdown.js.
+      const cleaned = cleanEdsMarkdown(published, {
+        pageUrl: job.url,
+        fetchedAt: this.fetchedOn,
+      });
+
+      if (cleaned.thin) {
+        // A listing page: its blocks are filled in at render time, so the
+        // authored document holds none of the items the page shows. Here the
+        // rendered page is the better document, and it is the only case where
+        // conversion beats the site's own Markdown.
+        job.needsConversion = true;
+        this.logger.debug(
+          `published markdown for ${job.url} is ${cleaned.stats.proseLength} chars of prose ` +
+            `across ${cleaned.stats.emptyBlocks} empty block(s) - converting the rendered page`
+        );
+        return;
+      }
+
+      job.markdown = cleaned.markdown;
+      job.markdownSource = 'site';
+    });
+  }
+
+  /**
+   * Write one page's Markdown, from whichever source produced it.
+   *
+   * Returns its path relative to the site directory, or null when the page
+   * wanted no Markdown or none could be made. A page that converts to nothing
+   * is reported and left without a .md rather than given an empty file: an
+   * empty document in a corpus is worse than a missing one, because it looks
+   * like it worked.
+   */
+  async _writeMarkdown(job, renderedDom) {
+    if (!job.needsMarkdown) return null;
+
+    let markdown = job.markdown;
+    if (!markdown && renderedDom) {
+      try {
+        markdown = htmlToMarkdown(renderedDom, { pageUrl: job.url, title: job.title });
+        job.markdownSource = 'converted';
+      } catch (error) {
+        this.report.recordError(`markdown conversion failed for ${job.url}: ${error.message}`);
+        this.logger.warn(`Could not convert ${job.url} to Markdown: ${error.message}`);
+        markdown = null;
+      }
+    }
+
+    if (!markdown) {
+      this.report.recordError(`no markdown produced for ${job.url}`);
+      this.logger.warn(`No Markdown for ${job.url}`);
+      return null;
+    }
+
+    try {
+      await fs.promises.mkdir(path.dirname(job.markdownPath), { recursive: true });
+      // One trailing newline: these are text files people and tools read line
+      // by line, and a missing final newline is a papercut in both.
+      await fs.promises.writeFile(job.markdownPath, `${markdown}\n`, 'utf8');
+    } catch (error) {
+      this.report.recordError(`could not write markdown for ${job.url}: ${error.message}`);
+      this.logger.warn(`Could not write ${job.markdownName}: ${error.message}`);
+      return null;
+    }
+
+    return path.relative(this.siteDirectory, job.markdownPath).replace(/\\/g, '/');
   }
 
   /**
@@ -491,6 +720,7 @@ class Crawler {
       try {
         const added = await rewriteFile(filePath, {
           pageUrl: page.url,
+          pageFile: siteDataRelative(page.file),
           assetsByUrl: linkMap,
           keepOriginal: this.config.keepOriginalHref,
         });
@@ -522,6 +752,7 @@ class Crawler {
     try {
       return await rewriteFile(job.filePath, {
         pageUrl: job.url,
+        pageFile: job.fileName,
         assetsByUrl: linkMap,
         keepOriginal: this.config.keepOriginalHref,
       });
@@ -538,7 +769,7 @@ class Crawler {
       this.queue = CrawlQueue.fromJSON(previous.queue);
       this.report.restore(previous.stats);
       this.processedCount = previous.processedCount || 0;
-      this.names.restore(this.report.pages);
+      this.names.restore(this.report.pages, restoredPageName);
       // Without this a resume re-downloads every file the first run already
       // took, and hands out fresh names for them on top.
       this.assets.restore(previous.assets);

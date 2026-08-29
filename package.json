@@ -30,6 +30,8 @@
     "cheerio": "^1.0.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
-    "robots-parser": "^3.0.1"
+    "robots-parser": "^3.0.1",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2"
   }
 }

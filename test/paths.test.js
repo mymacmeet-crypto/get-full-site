@@ -6,10 +6,13 @@ const path = require('node:path');
 
 const {
   flatFileName,
+  nestedFileName,
+  markdownSibling,
   sanitizeSegment,
   siteDir,
   reportDir,
-  rawHtmlDir,
+  siteDataDir,
+  assetsRelativeFrom,
   FlatNames,
 } = require('../src/utils/paths');
 
@@ -101,15 +104,93 @@ test('FlatNames re-adopts names from a resumed crawl', () => {
   assert.notStrictEqual(names.assign('https://example.com/about/'), 'about.html');
 });
 
-test('site layout is exactly report/ and raw-html/ under the host', () => {
+test('site layout is exactly report/ and site-data/ under the host', () => {
   const base = path.join('C:', 'out');
   const site = siteDir('https://example.com/some/page', base);
   assert.strictEqual(site, path.join(base, 'example.com'));
   assert.strictEqual(reportDir(site), path.join(base, 'example.com', 'report'));
-  assert.strictEqual(rawHtmlDir(site), path.join(base, 'example.com', 'raw-html'));
+  assert.strictEqual(siteDataDir(site), path.join(base, 'example.com', 'site-data'));
 });
 
 test('siteDir keeps a non-default port distinguishable', () => {
   const site = siteDir('http://localhost:8080/', path.join('C:', 'out'));
   assert.strictEqual(path.basename(site), 'localhost_8080');
+});
+
+test('nestedFileName mirrors the site path instead of flattening it', () => {
+  assert.strictEqual(nestedFileName('https://example.com/'), 'index.html');
+  assert.strictEqual(nestedFileName('https://example.com/blog'), 'blog.html');
+  assert.strictEqual(
+    nestedFileName('https://example.com/blog/adapt-to-2025'),
+    path.join('blog', 'adapt-to-2025.html')
+  );
+  // A trailing slash names a directory, whose document is its index.
+  assert.strictEqual(
+    nestedFileName('https://example.com/a/b/c/'),
+    path.join('a', 'b', 'c', 'index.html')
+  );
+  // /about and /about.html are the same page, so they must be the same file.
+  assert.strictEqual(nestedFileName('https://example.com/about.html'), 'about.html');
+});
+
+test('nestedFileName keeps a query string readable in the name', () => {
+  assert.strictEqual(nestedFileName('https://example.com/p?page=2'), 'p_q_page-2.html');
+});
+
+test('nestedFileName takes the extension it is given', () => {
+  assert.strictEqual(
+    nestedFileName('https://example.com/blog/post', '.md'),
+    path.join('blog', 'post.md')
+  );
+});
+
+test('a page HTML and Markdown differ in nothing but the extension', () => {
+  const html = nestedFileName('https://example.com/blog/post');
+  assert.strictEqual(markdownSibling(html), path.join('blog', 'post.md'));
+});
+
+test('markdownSibling carries a collision hash onto the Markdown file', () => {
+  // What FlatNames hands the loser of a collision. Re-deriving the name from
+  // the URL instead would drop the hash and let two pages share one .md.
+  assert.strictEqual(markdownSibling(path.join('blog', 'post-a1b2c3.html')), path.join('blog', 'post-a1b2c3.md'));
+});
+
+test('FlatNames disambiguates nested pages without splitting a directory name', () => {
+  const names = new FlatNames((url) => nestedFileName(url, '.html'));
+  const first = names.assign('https://example.com/v1.2/post');
+  assert.strictEqual(first, path.join('v1.2', 'post.html'));
+  // The hash belongs on the filename, never inside the directory above it.
+  assert.ok(first.endsWith('post.html'));
+});
+
+test('FlatNames keeps same-named pages in different directories apart', () => {
+  const names = new FlatNames((url) => nestedFileName(url, '.html'));
+  const blog = names.assign('https://example.com/blog/post');
+  const docs = names.assign('https://example.com/docs/post');
+  assert.notStrictEqual(blog, docs);
+  assert.strictEqual(blog, path.join('blog', 'post.html'));
+  assert.strictEqual(docs, path.join('docs', 'post.html'));
+});
+
+test('a resumed crawl re-adopts nested names by their full path', () => {
+  const names = new FlatNames((url) => nestedFileName(url, '.html'));
+  // Basenames would collapse these two onto "post.html" and invent a collision.
+  names.restore(
+    [
+      { url: 'https://example.com/blog/post', file: 'site-data/blog/post.html' },
+      { url: 'https://example.com/docs/post', file: 'site-data/docs/post.html' },
+    ],
+    (file) => file.replace(/^site-data\//, '')
+  );
+  assert.strictEqual(names.assign('https://example.com/blog/post'), 'blog/post.html');
+  assert.strictEqual(names.assign('https://example.com/docs/post'), 'docs/post.html');
+});
+
+test('assetsRelativeFrom climbs out of however deep a page sits', () => {
+  assert.strictEqual(assetsRelativeFrom('index.html'), '../assets');
+  assert.strictEqual(assetsRelativeFrom(path.join('blog', 'post.html')), '../../assets');
+  assert.strictEqual(
+    assetsRelativeFrom(path.join('a', 'b', 'c', 'index.html')),
+    '../../../../assets'
+  );
 });

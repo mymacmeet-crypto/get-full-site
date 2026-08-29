@@ -45,6 +45,26 @@ stating that it was changed. The changes made to the upstream sources are:
      Set is the same situation for time rather than memory - the linear scan
      was O(batch x run) per batch.
 
+  6. `lib/cdp-client.mjs` and `capture-api.mjs` can return a page's rendered DOM
+     alongside - or instead of - the captured file. Two new options drive it,
+     `saveRenderedDom` and `renderedDomOnly`, and every change is marked with a
+     `web-archiver:` comment at the site.
+
+     `capturePageData` reads `document.documentElement.outerHTML` at the one
+     moment it is worth having: after the page has settled and any injected
+     pass has run, but before SingleFile inlines anything. Read later, every
+     image is a base64 data: URI; read earlier, JavaScript-rendered content is
+     missing. Under `renderedDomOnly` the capture script is not run at all and
+     `getPageData` returns from that DOM, since the binding that would resolve
+     the page-data promise is never called. `capture-api.mjs` collects the
+     DOMs into a map the caller drains through a new `takeRenderedDoms()`, and
+     writes no output file for a `renderedDomOnly` page.
+
+     This project converts pages to Markdown (`--format md` / `--format both`).
+     Converting the captured file instead would mean paying for the inlining
+     and serialization of a file that is then discarded, and recovering the
+     original asset URLs from base64 payloads that replaced them.
+
 Other than the above, no source line was altered. Diffing this directory
 against upstream v2.0.83, after undoing the renames in items 1-3, shows only
-the change described in item 5.
+the changes described in items 5 and 6.

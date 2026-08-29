@@ -35,30 +35,126 @@ archive/
       assets-inventory.dry-run.json  never overwrites the report above
       assets-inventory.survey.json   the same, for --survey
       .crawl-state.json      resume state (removed on a clean finish)
-    raw-html/
+    site-data/
       index.html
+      index.md
       about.html
-      domains-root.html
-      domains-root-db.html
+      about.md
+      blog/
+        post-1.html
+        post-1.md
+      domains/
+        root/
+          db.html
+          db.md
     assets/                  only when the crawl downloaded something
       docs-annual-report.pdf
       files-price-list.xlsx
 ```
 
-`raw-html/` and `assets/` are **flat by design** — no subfolders, ever. A
-page's path becomes part of its filename:
+`site-data/` **mirrors the site's own paths**, and a page's two formats are the
+same name with different extensions, so either one is findable from a URL by
+reading it:
 
-| URL | File |
+| URL | Files |
 |---|---|
-| `https://example.com/` | `index.html` |
-| `https://example.com/about` | `about.html` |
-| `https://example.com/blog/post-1` | `blog-post-1.html` |
-| `https://example.com/domains/root/db` | `domains-root-db.html` |
+| `https://example.com/` | `index.html`, `index.md` |
+| `https://example.com/about` | `about.html`, `about.md` |
+| `https://example.com/blog/post-1` | `blog/post-1.html`, `blog/post-1.md` |
+| `https://example.com/domains/root/db` | `domains/root/db.html`, `domains/root/db.md` |
+| `https://example.com/a/b/c/` | `a/b/c/index.html` |
 | `https://example.com/p?page=2` | `p_q_page-2.html` |
 
-Flattening can make two different URLs want the same name (`/a/b` and `/a-b`).
+A page at `/blog` and pages under `/blog/` coexist as `blog.html` beside a
+`blog/` directory. Which extensions appear is what `--format` decides — see
+[Formats](#formats).
+
+`assets/` stays **flat by design** — no subfolders, ever. A downloaded file is
+linked from pages at many different depths, and one directory keeps that link
+short and identical from everywhere: `https://example.com/docs/annual-report.pdf`
+becomes `docs-annual-report.pdf`.
+
+Either rule can make two different URLs want the same name (`/a/b/c` and
+`/a/b/c/` both want `a/b/c/index.html`; `/a/b` and `/a-b` both want `a-b.pdf`).
 Rather than let one silently overwrite the other, the second gets a short hash
 of its URL appended. Nothing is ever lost to a name clash.
+
+## Formats
+
+`--format` decides what each page leaves behind:
+
+| | writes | from |
+|---|---|---|
+| `html` (default) | `blog/post-1.html` | the capture engine: every image, font and stylesheet inlined, so the page opens offline exactly as it looked |
+| `md` | `blog/post-1.md` | the site's own `<page>.md` if it publishes one, otherwise the rendered page converted |
+| `both` | both files | one page load produces both |
+
+**Where the Markdown comes from.** Edge Delivery Services sites — `aem.live` and
+everything built on it — serve `<path>.md` beside every page: the authored
+source, without the nav, the footer or a lossy trip through HTML. That is asked
+for first, and it wins when it exists. The question costs one request per host,
+not one per page: the first page probes, and a miss switches the whole crawl to
+conversion. `--no-native-md` skips the probe entirely, for a corpus where every
+document should have gone through the same conversion.
+
+**When it is converted instead**, the HTML comes from the browser *before* the
+capture engine inlines anything, so links and images keep their real URLs rather
+than becoming megabytes of base64. The conversion keeps the main content and
+drops the site chrome — nav, header, footer, cookie banners — which is what makes
+a converted document the same shape as one the site published itself. A corpus
+where half the documents repeat the nav and half do not is worse than either
+choice made uniformly.
+
+**`--format md` does not pay for a capture it throws away.** A page that needs
+converting is loaded, scrolled and read, and the inlining and serialization are
+skipped — measured on `www.aem.live`, 7.3s against 11.7s for the same three
+pages under `--format both`. A page whose Markdown came from the site never
+reaches the browser at all.
+
+Markdown always keeps live URLs; `--rewrite-links` applies to the HTML only.
+
+### What the cleanup actually removes
+
+**From the site's own Markdown.** `<path>.md` on an Edge Delivery site is the
+*authoring* document. The prose is the author's own and better than any
+conversion, but it arrives wrapped in the block syntax the authoring tools use -
+pandoc grid tables whose merged first row names a component. Measured over
+www.aem.live's 183 documents, **30.8% of every line was that box drawing**, all
+183 carried a `Metadata` block and 161 carried `Section Metadata`.
+
+Deleting every box table would be three lines of code and the wrong fix:
+`docs/sidekick-errors.md` is 91% box drawing and all of it is a real error-code
+table. So they are parsed instead (`src/eds-markdown.js`):
+
+| in the source | in the file |
+|---|---|
+| `Metadata` block | `title` and `description` become YAML front matter, with the page URL and the date it was fetched. Nav, Footer, Template and Category are site configuration and are dropped |
+| `Section Metadata` | dropped - it styles a section and can carry a `title` that would otherwise shadow the page's |
+| a real data table | a GFM table |
+| `Pagination`, `Breadcrumb`, `Gnav Brand`, … | dropped, the same way nav is dropped from a converted page. `Pagination` alone appears in 74 of the 183 |
+| any other block - `Feed`, `Columns`, `Hero`, `Cards` | unwrapped to its contents; the component name is not something the page says |
+
+Over the full 183 documents that is **32.6% fewer bytes and zero box-drawing
+lines left**, with 180 of them gaining a title in front matter. A site that
+serves plain Markdown rather than Edge Delivery blocks is passed through
+byte-identical - no front matter is invented for a document that carried no
+metadata block.
+
+**A listing page is the one case where conversion beats the site's own file.**
+`/blog`'s authored document holds an empty `Feed` block and not one of the
+twelve posts the rendered page shows. When what survives cleanup is thin prose
+around an empty block, that page - and only that page - is converted from the
+rendered DOM instead. On www.aem.live exactly three of 183 qualify: `/blog`,
+`/blog/archive` and `/community`.
+
+**From a converted page.** A card on a listing page is one `<a>` wrapped around
+a heading, a summary and an image, and Turndown puts the link delimiters where
+the anchor opens and closes - which emits a stray `](url)[` on its own line and
+swallows what follows. That is broken Markdown, not merely ugly, and there is
+one per card. The link is moved onto the card's heading instead, so a card
+becomes `### [Title](url)` followed by its summary. Link `title` attributes that
+only repeat the link text are dropped, and a link left empty by a stripped icon
+is removed rather than left as `[](url)`.
 
 ## Requirements
 
@@ -200,6 +296,8 @@ set.
 
 | Flag | Default | What it does |
 |---|---|---|
+| `-f, --format <format>` | `html` | What to save per page: `html`, `md` or `both` (see [Formats](#formats)) |
+| `--no-native-md` | — | Always convert, never take the site's own `<page>.md` |
 | `-p, --max-pages <n>` | `100` | How many pages to archive |
 | `-d, --depth <n>` | `3` | Link depth from the seeds (`0` = seeds only) |
 | `--include <regex>` | — | Only crawl matching URLs (repeatable) |
@@ -305,6 +403,18 @@ than one missing them. A row with no `lastModified` at all is always re-fetched:
 without a timestamp there is no evidence it is unchanged, and quietly keeping a
 stale record costs more than one request. `--force` rebuilds everything.
 
+The block scaffolding is parsed away here too - `dataset.jsonl`'s `text` field
+and the per-document files hold the prose, not the boxes. See
+[what the cleanup removes](#what-the-cleanup-actually-removes); the same module
+does the work. No front matter is added, because the record already carries
+`title`, `description`, `url` and `fetchedAt` as fields and repeating them in
+the text would only embed them twice. `--raw-blocks` keeps the site's bytes
+verbatim.
+
+Cleaning changes the `text` a record holds, so an existing `dataset.jsonl`
+collected before this only picks it up for documents whose `lastModified` has
+moved. `--force` re-fetches and re-cleans the whole corpus.
+
 ### `noindex` is honoured
 
 The index's `robots` column is the publisher marking one specific document, which
@@ -399,7 +509,7 @@ The two halves do different jobs, and the split is worth understanding:
 |---|---|---|
 | decides what to take | crawler: sitemap, links, scope rules | you do, by visiting pages |
 | session state | anonymous fetches | your real browser — logins and cookies apply |
-| output | `archive/<domain>/raw-html/`, flat and hash-deduped | `session_<date>_<time>/pages/` in a folder you pick |
+| output | `archive/<domain>/site-data/`, nested and hash-deduped | `session_<date>_<time>/pages/` in a folder you pick |
 | runs | when you invoke it | continuously, in the background |
 
 That middle row is the reason the extension is here at all: it captures the
@@ -640,7 +750,7 @@ taken.
 
 A dry run and a survey write under their own filenames on purpose. They archive
 nothing, so landing on the filenames above would replace a real crawl's report
-while that crawl's pages and files were still sitting in `raw-html/` and
+while that crawl's pages and files were still sitting in `site-data/` and
 `assets/` — a report saying `dryRun: true` next to a full `assets/` folder reads
 as though the dry run had downloaded it. It also fed the wrong settings into the
 next `--resume`, which carries a crawl's options forward from
