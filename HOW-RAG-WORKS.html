@@ -1,0 +1,587 @@
+<title>How RAG Answers From Your Docs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    color-scheme: light;
+    --page:        #f6f7f9;
+    --panel:       #ffffff;
+    --panel-sunk:  #f1f3f6;
+    --ink:         #12161a;
+    --ink-2:       #586471;
+    --ink-3:       #8a949e;
+    --rule:        #dfe3e8;
+    --rule-soft:   #ebeef1;
+    --accent:      #2a78d6;
+    --accent-soft: #eaf1fb;
+    --once:        #86b6ef;
+    --every:       #104281;
+    --shadow: 0 1px 2px rgba(18, 22, 26, .05), 0 8px 24px -16px rgba(18, 22, 26, .18);
+    --display: "IBM Plex Sans Condensed", "Helvetica Neue", Arial, sans-serif;
+    --body:    "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    --mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --measure: 66ch;
+    --wide:    1000px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:        #0f1215;
+      --panel:       #15181b;
+      --panel-sunk:  #1b1f23;
+      --ink:         #eef1f4;
+      --ink-2:       #a2adb8;
+      --ink-3:       #6f7b86;
+      --rule:        #252b31;
+      --rule-soft:   #1e2328;
+      --accent:      #3987e5;
+      --accent-soft: #16283d;
+      --once:        #b7d3f6;
+      --every:       #5598e7;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.6);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:        #0f1215;
+    --panel:       #15181b;
+    --panel-sunk:  #1b1f23;
+    --ink:         #eef1f4;
+    --ink-2:       #a2adb8;
+    --ink-3:       #6f7b86;
+    --rule:        #252b31;
+    --rule-soft:   #1e2328;
+    --accent:      #3987e5;
+    --accent-soft: #16283d;
+    --once:        #b7d3f6;
+    --every:       #5598e7;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.6);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--wide); margin: 0 auto; padding: 0 28px 96px; }
+
+  p, ul, ol { max-width: var(--measure); }
+  p { margin: 0 0 1.1em; }
+  ul, ol { margin: 0 0 1.2em; padding-left: 1.3em; }
+  li { margin-bottom: .45em; }
+  li::marker { color: var(--ink-3); }
+  strong { font-weight: 600; }
+
+  code, .mono { font-family: var(--mono); }
+  p code, li code, td code {
+    font-size: .86em;
+    background: var(--panel-sunk);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: .1em .34em;
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  h1, h2, h3, h4 {
+    font-family: var(--display);
+    font-weight: 700;
+    line-height: 1.1;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -.005em;
+  }
+  h1 { font-size: clamp(2.7rem, 6.4vw, 4.2rem); letter-spacing: -.022em; }
+  h2 { font-size: clamp(1.7rem, 3.4vw, 2.3rem); margin-bottom: .5rem; }
+  h3 { font-size: 1.24rem; font-weight: 600; margin-bottom: .35rem; }
+  h4 { font-size: 1rem; font-weight: 600; margin-bottom: .3rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .705rem;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 .85rem;
+    display: block;
+  }
+
+  header.masthead {
+    border-bottom: 1px solid var(--rule);
+    padding: 52px 0 40px;
+    margin-bottom: 56px;
+  }
+  .masthead .lede {
+    font-size: 1.22rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 58ch;
+    margin: 1.35rem 0 0;
+  }
+
+  section { margin-bottom: 68px; }
+  section > h2 + p.sub {
+    color: var(--ink-2);
+    font-size: 1.05rem;
+    margin-bottom: 1.9rem;
+    max-width: 62ch;
+  }
+  hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 0 0 56px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    box-shadow: var(--shadow);
+    padding: 26px;
+    margin: 0 0 26px;
+  }
+
+  .note {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 16px 20px;
+    margin: 0 0 26px;
+    max-width: var(--measure);
+  }
+  .note p:last-child { margin-bottom: 0; }
+  .note .tag {
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: .5em;
+  }
+
+  /* figures */
+  figure { margin: 0; }
+  figure svg { display: block; width: 100%; max-width: 100%; height: auto; }
+  figcaption {
+    font-size: .88rem;
+    color: var(--ink-2);
+    margin-top: 14px;
+    max-width: 66ch;
+  }
+  .figscroll { overflow-x: auto; }
+
+  .box     { fill: var(--panel-sunk); stroke: var(--rule); stroke-width: 1; }
+  .box-hi  { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+  .box-t   { font-family: var(--display); font-size: 15px; font-weight: 700; fill: var(--ink); }
+  .box-s   { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-3); }
+  .edge    { stroke: var(--ink-3); stroke-width: 1.4; fill: none; }
+  .edge-hi { stroke: var(--accent); stroke-width: 1.7; fill: none; }
+  .edge-t  { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
+  .lane-t  { font-family: var(--mono); font-size: 11px; fill: var(--ink-3); letter-spacing: .12em; }
+  .band-once  { fill: var(--once); }
+  .band-every { fill: var(--every); }
+
+  /* prompt stack */
+  .stack { display: flex; flex-direction: column; gap: 2px; max-width: 620px; }
+  .slab {
+    border: 1px solid var(--rule);
+    background: var(--panel-sunk);
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: .76rem;
+    line-height: 1.55;
+    display: flex;
+    justify-content: space-between;
+    gap: 1em;
+    align-items: baseline;
+  }
+  .slab.retrieved { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 34%, var(--rule)); }
+  .slab .lbl { color: var(--ink); }
+  .slab .tok { color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .slab.total { background: var(--panel); border-color: var(--ink-3); }
+  .slab.total .lbl, .slab.total .tok { color: var(--ink); font-weight: 500; }
+
+  pre.code {
+    font-family: var(--mono);
+    font-size: .74rem;
+    line-height: 1.6;
+    background: var(--panel-sunk);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 16px 18px;
+    margin: 0 0 20px;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--ink-2);
+  }
+  pre.code b { color: var(--accent); font-weight: 500; }
+  pre.code i { color: var(--ink-3); font-style: normal; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--panel); margin-bottom: 26px; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; min-width: 520px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .11em;
+    text-transform: uppercase; color: var(--ink-3); font-weight: 500;
+    border-bottom: 1px solid var(--rule);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--rule);
+    border: 1px solid var(--rule); margin: 0 0 26px;
+  }
+  .stat { background: var(--panel); padding: 18px; }
+  .stat .v {
+    font-family: var(--display); font-size: 1.95rem; font-weight: 700;
+    line-height: 1; font-variant-numeric: tabular-nums; display: block;
+  }
+  .stat .k {
+    font-family: var(--mono); font-size: .67rem; letter-spacing: .11em;
+    text-transform: uppercase; color: var(--ink-3); margin-top: .6em; display: block;
+  }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: 24px;
+    font-family: var(--mono);
+    font-size: .73rem;
+    color: var(--ink-3);
+    line-height: 1.7;
+  }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="eyebrow">www.aem.live &middot; 183 pages &middot; 583 chunks</span>
+    <h1>How RAG Answers From Your Docs</h1>
+    <p class="lede">
+      The model was never trained on aem.live and never will be. It answers your
+      questions by <strong>reading the relevant paragraphs in the prompt</strong>, every
+      single time. That one sentence is the whole idea.
+    </p>
+  </header>
+
+  <section>
+    <span class="eyebrow">The short version</span>
+    <h2>It is search, then paste, then ask</h2>
+
+    <p>
+      RAG stands for Retrieval-Augmented Generation, which is a heavy name for three
+      plain steps:
+    </p>
+    <ul>
+      <li><strong>Retrieval</strong> &mdash; find the handful of paragraphs most likely to hold the answer.</li>
+      <li><strong>Augmented</strong> &mdash; paste those paragraphs into the prompt, above the question.</li>
+      <li><strong>Generation</strong> &mdash; the model writes an answer using only what it just read.</li>
+    </ul>
+    <p>
+      There is no training, no fine-tuning, and no moment where the model
+      &ldquo;learns&rdquo; your documentation. Nothing about the model changes. You are
+      just very good at deciding what to show it.
+    </p>
+
+    <div class="note">
+      <span class="tag">The thing that surprises people</span>
+      <p>
+        If you paste the right paragraph into a prompt by hand and ask your question
+        underneath it, you have done RAG. Everything else on this page is machinery for
+        doing that automatically, 583 chunks at a time, in under a second.
+      </p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="eyebrow">Diagram 1 of 3</span>
+    <h2>Build once</h2>
+    <p class="sub">
+      This runs when you set the system up, and again only when the site changes. It ends
+      with a searchable store &mdash; and it is the only part that ever touches your files.
+    </p>
+
+    <div class="panel" style="max-width:none">
+      <figure class="figscroll">
+        <svg viewBox="0 0 960 210" role="img" aria-label="Build path: dataset.jsonl is cleaned, split into 583 chunks, each chunk turned into numbers by an embedding model, and stored in a searchable vector store.">
+          <defs>
+            <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--ink-3)"></path>
+            </marker>
+          </defs>
+
+          <rect class="band-once" x="20" y="16" width="4" height="14"></rect>
+          <text class="lane-t" x="34" y="28">RUNS ONCE</text>
+
+          <rect class="box" x="20" y="60" width="150" height="66" rx="3"></rect>
+          <text class="box-t" x="36" y="88">dataset.jsonl</text>
+          <text class="box-s" x="36" y="107">183 pages, 470k tokens</text>
+
+          <path class="edge" d="M 170 93 L 206 93" marker-end="url(#a1)"></path>
+
+          <rect class="box" x="210" y="60" width="150" height="66" rx="3"></rect>
+          <text class="box-t" x="226" y="88">Clean</text>
+          <text class="box-s" x="226" y="107">drop junk, flatten tables</text>
+
+          <path class="edge" d="M 360 93 L 396 93" marker-end="url(#a1)"></path>
+
+          <rect class="box" x="400" y="60" width="150" height="66" rx="3"></rect>
+          <text class="box-t" x="416" y="88">Split</text>
+          <text class="box-s" x="416" y="107">583 chunks, ~700 tokens</text>
+
+          <path class="edge" d="M 550 93 L 586 93" marker-end="url(#a1)"></path>
+
+          <rect class="box" x="590" y="60" width="150" height="66" rx="3"></rect>
+          <text class="box-t" x="606" y="88">Turn to numbers</text>
+          <text class="box-s" x="606" y="107">an embedding model</text>
+
+          <path class="edge" d="M 740 93 L 776 93" marker-end="url(#a1)"></path>
+
+          <rect class="box-hi" x="780" y="60" width="160" height="66" rx="3"></rect>
+          <text class="box-t" x="796" y="88">Vector store</text>
+          <text class="box-s" x="796" y="107">583 rows, searchable</text>
+
+          <text class="edge-t" x="20" y="160">Each chunk becomes a list of numbers describing its meaning. Similar meanings get similar numbers.</text>
+          <text class="edge-t" x="20" y="180">Re-run only for pages whose fingerprint changed &mdash; that is what lastModified and sha256 are for.</text>
+        </svg>
+        <figcaption>
+          The expensive step is the fourth one, because you pay per chunk to turn text
+          into numbers. That is exactly why re-indexing only the changed pages matters.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="eyebrow">Diagram 2 of 3</span>
+    <h2>Then answer, over and over</h2>
+    <p class="sub">
+      This runs every time someone asks something. Notice what it never touches: your
+      Markdown, your JSONL, the website. It only reads the store.
+    </p>
+
+    <div class="panel" style="max-width:none">
+      <figure class="figscroll">
+        <svg viewBox="0 0 960 290" role="img" aria-label="Query path: a question is turned into numbers, compared against the 583 stored chunks, the closest five are pasted into a prompt, and the model writes an answer with citations.">
+          <defs>
+            <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--ink-3)"></path>
+            </marker>
+            <marker id="a2h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+
+          <rect class="band-every" x="20" y="16" width="4" height="14"></rect>
+          <text class="lane-t" x="34" y="28">RUNS EVERY QUESTION</text>
+
+          <!-- store feeding in from above -->
+          <rect class="box-hi" x="400" y="52" width="160" height="50" rx="3"></rect>
+          <text class="box-t" x="416" y="76">Vector store</text>
+          <text class="box-s" x="416" y="92">583 chunks</text>
+          <path class="edge-hi" d="M 480 102 L 480 142" marker-end="url(#a2h)"></path>
+          <text class="edge-t" x="490" y="126">compare against all 583</text>
+
+          <rect class="box" x="20" y="146" width="150" height="66" rx="3"></rect>
+          <text class="box-t" x="36" y="174">The question</text>
+          <text class="box-s" x="36" y="193">&ldquo;Is EDS an SSG?&rdquo;</text>
+
+          <path class="edge" d="M 170 179 L 206 179" marker-end="url(#a2)"></path>
+
+          <rect class="box" x="210" y="146" width="150" height="66" rx="3"></rect>
+          <text class="box-t" x="226" y="174">Turn to numbers</text>
+          <text class="box-s" x="226" y="193">same embedding model</text>
+
+          <path class="edge" d="M 360 179 L 396 179" marker-end="url(#a2)"></path>
+
+          <rect class="box" x="400" y="146" width="160" height="66" rx="3"></rect>
+          <text class="box-t" x="416" y="174">Find closest</text>
+          <text class="box-s" x="416" y="193">keep the top 5</text>
+
+          <path class="edge" d="M 560 179 L 596 179" marker-end="url(#a2)"></path>
+
+          <rect class="box-hi" x="600" y="146" width="160" height="66" rx="3"></rect>
+          <text class="box-t" x="616" y="174">Build the prompt</text>
+          <text class="box-s" x="616" y="193">5 chunks + question</text>
+
+          <path class="edge" d="M 760 179 L 796 179" marker-end="url(#a2)"></path>
+
+          <rect class="box" x="800" y="146" width="140" height="66" rx="3"></rect>
+          <text class="box-t" x="816" y="174">The model</text>
+          <text class="box-s" x="816" y="193">answers + cites</text>
+
+          <text class="edge-t" x="20" y="248">The model sees roughly 3,300 tokens of your documentation &mdash; not 380,000. It never sees the other 578 chunks.</text>
+          <text class="edge-t" x="20" y="268">Same embedding model as the build step, or the numbers are not comparable and search returns nonsense.</text>
+        </svg>
+        <figcaption>
+          The whole loop is search plus one model call. Under a second, and it costs
+          fractions of a cent because only five chunks travel.
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="note">
+      <span class="tag">The one wire that breaks everything</span>
+      <p>
+        The question must be turned into numbers by the <strong>same embedding model</strong>
+        used on the chunks. Swap the model on one side and the numbers stop meaning the
+        same thing &mdash; search still returns five chunks, they are just the wrong five,
+        with no error anywhere. If you change embedding models, rebuild the whole store.
+      </p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="eyebrow">Diagram 3 of 3</span>
+    <h2>What the model actually receives</h2>
+    <p class="sub">
+      This is the part that feels like magic until you see it. There is no magic &mdash; the
+      answer is in the prompt, because you put it there.
+    </p>
+
+    <div class="panel" style="max-width:none">
+      <div class="stack">
+        <div class="slab"><span class="lbl">Instructions &mdash; &ldquo;answer only from the text below, cite the URL&rdquo;</span><span class="tok">~120 tok</span></div>
+        <div class="slab retrieved"><span class="lbl">Chunk 1 &nbsp;/docs/faq#ssg</span><span class="tok">707 tok</span></div>
+        <div class="slab retrieved"><span class="lbl">Chunk 2 &nbsp;/docs/faq#fast</span><span class="tok">690 tok</span></div>
+        <div class="slab retrieved"><span class="lbl">Chunk 3 &nbsp;/developer/keeping-it-100</span><span class="tok">652 tok</span></div>
+        <div class="slab retrieved"><span class="lbl">Chunk 4 &nbsp;/docs/authoring</span><span class="tok">631 tok</span></div>
+        <div class="slab retrieved"><span class="lbl">Chunk 5 &nbsp;/blog/edge-next</span><span class="tok">580 tok</span></div>
+        <div class="slab"><span class="lbl">The question &mdash; &ldquo;Is Edge Delivery Services a static site generator?&rdquo;</span><span class="tok">~14 tok</span></div>
+        <div class="slab total"><span class="lbl">Total sent to the model</span><span class="tok">~3,394 tok</span></div>
+      </div>
+
+      <p style="margin-top:26px;max-width:66ch">
+        Written out, the prompt is just text. Nothing clever:
+      </p>
+
+      <pre class="code">Answer the question using only the sources below.
+Cite the URL you used. If the sources do not
+contain the answer, say so.
+
+<i>--- SOURCE 1 -----------------------------------</i>
+<b>url:</b>   https://www.aem.live/docs/faq#ssg
+<b>title:</b> Frequently Asked Questions
+<b>path:</b>  FAQ &gt; General Questions &gt; Is EDS an SSG?
+
+No, Edge Delivery Services is *not* a Static Site
+Generator. Unlike traditional SSGs that require a
+full rebuild to update content, it renders and
+serves content at the edge...
+
+<i>--- SOURCE 2 -----------------------------------</i>
+<i>  ... four more sources ...</i>
+
+<i>--- QUESTION -----------------------------------</i>
+Is Edge Delivery Services a static site generator?</pre>
+
+      <p style="max-width:66ch">
+        The model reads that and writes: <em>&ldquo;No. Unlike a static site generator,
+        Edge Delivery Services renders at the edge, so content updates without a
+        rebuild.&rdquo;</em> &mdash; citing <code>/docs/faq#ssg</code>. It knew nothing about
+        aem.live a second earlier.
+      </p>
+    </div>
+
+    <div class="note">
+      <span class="tag">Where your cleaning work shows up</span>
+      <p>
+        Look at the <code>url</code>, <code>title</code> and <code>path</code> lines on
+        each source. Those come from <code>dataset.jsonl</code>. Without them the model
+        gets five anonymous walls of text and cannot cite anything &mdash; which is the whole
+        reason stage 2 reads the JSONL and not the Markdown folder.
+      </p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="eyebrow">Your numbers</span>
+    <h2>What this costs per question</h2>
+
+    <div class="stats">
+      <div class="stat"><span class="v">583</span><span class="k">Chunks stored</span></div>
+      <div class="stat"><span class="v">707</span><span class="k">Median tokens each</span></div>
+      <div class="stat"><span class="v">5</span><span class="k">Sent per question</span></div>
+      <div class="stat"><span class="v">3.4k</span><span class="k">Tokens per prompt</span></div>
+      <div class="stat"><span class="v">~$0.03</span><span class="k">Per question</span></div>
+    </div>
+
+    <p>
+      At Claude Opus 5 rates &mdash; $5 per million tokens in, $25 per million out &mdash; a
+      3,400-token prompt with a 400-token answer costs about three cents. The alternative,
+      sending all 183 pages every time, looks like this:
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Approach</th><th>Tokens in per question</th><th>Rough cost in</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Retrieve top 5 chunks</td><td class="num">3,394</td><td class="num">$0.017</td></tr>
+          <tr><td>Send the whole cleaned corpus</td><td class="num">380,456</td><td class="num">$1.90</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      That is the case for retrieval in one line: about 110&times; cheaper per question.
+      Prompt caching narrows the gap a lot if you ever want the whole corpus in context,
+      but retrieval stays the cheaper path for high question volume.
+    </p>
+  </section>
+
+  <hr class="rule">
+
+  <section>
+    <span class="eyebrow">Worth knowing</span>
+    <h2>Where this goes wrong</h2>
+
+    <p>
+      Every RAG failure is one of four things, and none of them are the model's fault:
+    </p>
+    <ul>
+      <li><strong>The right chunk was never retrieved.</strong> The most common failure by far. The model answered honestly from four irrelevant chunks. Fix retrieval, not the prompt.</li>
+      <li><strong>The chunk was retrieved but cut badly</strong> &mdash; a table row split from its headings, so the words arrived without their meaning. This is exactly what flattening the box-art tables prevents.</li>
+      <li><strong>The answer is spread across many pages.</strong> Five chunks cannot answer &ldquo;summarise every deprecation in 2026&rdquo;. Retrieval finds passages; it does not survey a corpus.</li>
+      <li><strong>Nothing in your docs answers it</strong> &mdash; and the model should say so. That is what the &ldquo;if the sources do not contain the answer, say so&rdquo; instruction is for.</li>
+    </ul>
+
+    <div class="note">
+      <span class="tag">How to test it</span>
+      <p>
+        Write 20 real questions with the answer's URL next to each. Then measure one
+        number: how often the correct page appears in the top 5. That single percentage
+        tells you more than any amount of prompt tuning, because if the right chunk never
+        arrives, no prompt can save the answer.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    Chunk counts measured 2026-08-26 by simulating heading-aware packing at a ~700-token
+    target over archive/www.aem.live &mdash; 583 chunks from 183 pages.<br>
+    Corpus size of 380,456 tokens reflects junk removal only; flattening the box-art
+    tables reduces it further. Prices are Claude Opus 5 list rates and exclude embedding.
+  </footer>
+
+</div>

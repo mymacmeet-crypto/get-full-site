@@ -1,0 +1,1093 @@
+<title>One Pipe, Many Sources</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+
+<style>
+  :root {
+    --bg: #f4f5f8;
+    --surface: #ffffff;
+    --surface-2: #eceef3;
+    --text: #16181f;
+    --muted: #5c6272;
+    --faint: #878da0;
+    --line: #d9dce4;
+    --line-strong: #c2c7d4;
+    --accent: #a86a00;
+    --accent-text: #8a5700;
+    --accent-wash: #fdf3e0;
+    --warn: #b3400c;
+    --good: #14683a;
+
+    --measure: 66ch;
+    --plate: 1040px;
+
+    --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --f-body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1118;
+      --surface: #161922;
+      --surface-2: #1d212c;
+      --text: #e7e9f0;
+      --muted: #9aa1b3;
+      --faint: #6f768a;
+      --line: #262b38;
+      --line-strong: #333a4a;
+      --accent: #f0b429;
+      --accent-text: #f5c453;
+      --accent-wash: #2a2113;
+      --warn: #f98d5c;
+      --good: #5ad18c;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0f1118;
+    --surface: #161922;
+    --surface-2: #1d212c;
+    --text: #e7e9f0;
+    --muted: #9aa1b3;
+    --faint: #6f768a;
+    --line: #262b38;
+    --line-strong: #333a4a;
+    --accent: #f0b429;
+    --accent-text: #f5c453;
+    --accent-wash: #2a2113;
+    --warn: #f98d5c;
+    --good: #5ad18c;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: var(--plate); margin: 0 auto; }
+  .measure { max-width: var(--measure); }
+
+  /* ---------- masthead ---------- */
+
+  header.masthead {
+    border-bottom: 1px solid var(--line-strong);
+    padding: 56px 0 28px;
+    margin-bottom: 44px;
+  }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent-text);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(2.1rem, 5.2vw, 3.3rem);
+    line-height: 1.04;
+    letter-spacing: -.022em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+    max-width: 20ch;
+  }
+  .standfirst {
+    font-size: 1.14rem;
+    color: var(--muted);
+    max-width: 58ch;
+    margin: 0 0 30px;
+  }
+  .standfirst strong { color: var(--text); font-weight: 600; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--faint);
+  }
+  .meta b { color: var(--muted); font-weight: 500; }
+
+  /* ---------- sections ---------- */
+
+  section { margin: 0 0 68px; }
+
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.62rem;
+    letter-spacing: -.014em;
+    line-height: 1.2;
+    text-wrap: balance;
+    margin: 0 0 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+  h2 .num {
+    font-family: var(--f-mono);
+    font-size: .72em;
+    font-weight: 400;
+    color: var(--accent-text);
+    margin-right: .7em;
+  }
+  h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.06rem;
+    letter-spacing: -.005em;
+    margin: 34px 0 8px;
+  }
+  .kicker {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 22px;
+  }
+  p { margin: 0 0 16px; }
+  a { color: var(--accent-text); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+  strong { font-weight: 600; }
+  code {
+    font-family: var(--f-mono);
+    font-size: .855em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: .08em .34em;
+  }
+
+  .lede { font-size: 1.06rem; }
+
+  /* ---------- plates: figures, tables, code ---------- */
+
+  figure {
+    margin: 30px 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 26px 24px 18px;
+    overflow-x: auto;
+  }
+  figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figcaption {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    margin-top: 20px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  figcaption b { color: var(--text); font-weight: 500; }
+
+  .table-scroll { overflow-x: auto; margin: 26px 0; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14.5px;
+    font-family: var(--f-display);
+    font-weight: 500;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--f-mono);
+    font-weight: 500;
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    border-bottom-color: var(--line-strong);
+    white-space: nowrap;
+  }
+  td code { background: none; border: none; padding: 0; color: var(--muted); }
+  .num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag-dup { color: var(--warn); font-family: var(--f-mono); font-size: 12px; }
+  .tag-ok { color: var(--good); font-family: var(--f-mono); font-size: 12px; }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 4px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    margin: 22px 0;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 13px;
+    line-height: 1.66;
+    color: var(--text);
+  }
+  .c { color: var(--faint); }
+  .k { color: var(--accent-text); }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    border-left: 2px solid var(--line-strong);
+    padding: 2px 0 2px 20px;
+    margin: 26px 0;
+    color: var(--muted);
+    font-size: 15.5px;
+  }
+  .note b { color: var(--text); }
+  .flag {
+    background: var(--accent-wash);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin: 26px 0;
+    font-size: 15.5px;
+  }
+  .flag .flag-label {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent-text);
+    display: block;
+    margin-bottom: 7px;
+  }
+
+  /* ---------- phases ---------- */
+
+  .phases { display: grid; gap: 2px; margin: 28px 0; background: var(--line); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .phase { background: var(--surface); padding: 20px 22px; display: grid; grid-template-columns: 54px 1fr; gap: 18px; align-items: start; }
+  .phase-n {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--accent-text);
+    padding-top: 3px;
+    letter-spacing: .06em;
+  }
+  .phase h4 {
+    font-family: var(--f-display);
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  .phase p { margin: 0 0 8px; font-size: 15.5px; color: var(--muted); }
+  .phase p:last-child { margin-bottom: 0; }
+  .phase .ships {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    color: var(--faint);
+  }
+  .phase .ships b { color: var(--good); font-weight: 500; }
+
+  ul.tight { margin: 0 0 16px; padding-left: 20px; }
+  ul.tight li { margin-bottom: 7px; }
+
+  /* ---------- diagram primitives ---------- */
+
+  .d-box { fill: var(--surface-2); stroke: var(--line-strong); stroke-width: 1.2; }
+  .d-box-key { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.6; }
+  .d-box-plain { fill: none; stroke: var(--line-strong); stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .d-t { font-family: var(--f-mono); font-size: 12px; fill: var(--text); }
+  .d-t-sm { font-family: var(--f-mono); font-size: 10.5px; fill: var(--muted); }
+  .d-t-key { font-family: var(--f-mono); font-size: 12px; fill: var(--accent-text); }
+  .d-t-hd { font-family: var(--f-display); font-size: 12.5px; font-weight: 600; fill: var(--text); letter-spacing: .04em; }
+  .d-l { stroke: var(--line-strong); stroke-width: 1.3; fill: none; }
+  .d-l-key { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+  .d-l-dash { stroke: var(--warn); stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+  .d-arw { fill: var(--line-strong); }
+  .d-arw-key { fill: var(--accent); }
+  .d-t-warn { font-family: var(--f-mono); font-size: 10.5px; fill: var(--warn); }
+  .d-waist { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.8; }
+
+  footer.end {
+    border-top: 1px solid var(--line-strong);
+    padding-top: 26px;
+    margin-top: 20px;
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--faint);
+    line-height: 1.75;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding: 0 18px 72px; }
+    figure { padding: 18px 14px 12px; }
+    .phase { grid-template-columns: 1fr; gap: 6px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Architecture proposal · no code changed</p>
+    <h1>One pipe, many sources</h1>
+    <p class="standfirst">
+      <code>web-archiver</code> has grown two pipelines that do the same five things in
+      different ways. This is a plan to collapse them into one harness with a
+      <strong>single document contract</strong> at the centre — so a new site, a new
+      format, or a RAG index becomes a plug rather than a new pipeline.
+    </p>
+    <div class="meta">
+      <span><b>Repo</b> mymacmeet-crypto/get-full-site</span>
+      <span><b>Status</b> proposal for review</span>
+      <span><b>Scope</b> 3,546 lines across two CLIs</span>
+    </div>
+  </header>
+
+  <section>
+    <h2><span class="num">01</span>Where the code actually is</h2>
+    <p class="kicker">Measured, not estimated</p>
+
+    <div class="measure">
+      <p class="lede">
+        Two commands exist today. <code>bin/archive.js</code> crawls a domain and captures
+        each page as standalone HTML. <code>bin/dataset.js</code> reads an Edge Delivery
+        query index and pulls each page as Markdown.
+      </p>
+      <p>
+        They feel like different programs, and in two respects they genuinely are. But
+        run the stages side by side and most of the difference disappears: both discover
+        a list of URLs, filter it, fetch each one, turn bytes into something worth
+        keeping, and write a report. Only two of those five stages differ in substance.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 880 372" role="img" aria-label="The archive and dataset pipelines drawn as five stages each. Stages one, three and five do the same job in both and are implemented twice; only stages two and four genuinely differ.">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw" points="0,1 10,5 0,9"></polygon>
+          </marker>
+        </defs>
+
+        <text class="d-t-hd" x="40" y="26">bin/archive.js</text>
+        <text class="d-t-sm" x="152" y="26">2,470 lines</text>
+
+        <rect class="d-box" x="40" y="40" width="150" height="54" rx="3"></rect>
+        <text class="d-t" x="115" y="66" text-anchor="middle">CLI + flags</text>
+        <text class="d-t-sm" x="115" y="82" text-anchor="middle">cli.js</text>
+
+        <rect class="d-box-key" x="208" y="40" width="150" height="54" rx="3"></rect>
+        <text class="d-t-key" x="283" y="66" text-anchor="middle">crawl frontier</text>
+        <text class="d-t-sm" x="283" y="82" text-anchor="middle">links + sitemap</text>
+
+        <rect class="d-box" x="376" y="40" width="150" height="54" rx="3"></rect>
+        <text class="d-t" x="451" y="66" text-anchor="middle">fetch page</text>
+        <text class="d-t-sm" x="451" y="82" text-anchor="middle">fetcher.js</text>
+
+        <rect class="d-box-key" x="544" y="40" width="150" height="54" rx="3"></rect>
+        <text class="d-t-key" x="619" y="66" text-anchor="middle">browser capture</text>
+        <text class="d-t-sm" x="619" y="82" text-anchor="middle">SingleFile</text>
+
+        <rect class="d-box" x="712" y="40" width="150" height="54" rx="3"></rect>
+        <text class="d-t" x="787" y="66" text-anchor="middle">report + state</text>
+        <text class="d-t-sm" x="787" y="82" text-anchor="middle">report.js</text>
+
+        <line class="d-l" x1="192" y1="67" x2="204" y2="67" marker-end="url(#a1)"></line>
+        <line class="d-l" x1="360" y1="67" x2="372" y2="67" marker-end="url(#a1)"></line>
+        <line class="d-l" x1="528" y1="67" x2="540" y2="67" marker-end="url(#a1)"></line>
+        <line class="d-l" x1="696" y1="67" x2="708" y2="67" marker-end="url(#a1)"></line>
+
+        <line class="d-l-dash" x1="115" y1="96" x2="115" y2="246"></line>
+        <line class="d-l-dash" x1="451" y1="96" x2="451" y2="246"></line>
+        <line class="d-l-dash" x1="787" y1="96" x2="787" y2="246"></line>
+
+        <rect x="52" y="158" width="126" height="26" rx="3" fill="var(--bg)"></rect>
+        <text class="d-t-warn" x="115" y="175" text-anchor="middle">10 flags, twice</text>
+
+        <rect x="382" y="158" width="138" height="26" rx="3" fill="var(--bg)"></rect>
+        <text class="d-t-warn" x="451" y="175" text-anchor="middle">retry logic ×3</text>
+
+        <rect x="716" y="158" width="142" height="26" rx="3" fill="var(--bg)"></rect>
+        <text class="d-t-warn" x="787" y="175" text-anchor="middle">summary + state ×2</text>
+
+        <text class="d-t-key" x="283" y="176" text-anchor="middle">differs</text>
+        <text class="d-t-key" x="619" y="176" text-anchor="middle">differs</text>
+
+        <rect class="d-box" x="40" y="248" width="150" height="54" rx="3"></rect>
+        <text class="d-t" x="115" y="274" text-anchor="middle">CLI + flags</text>
+        <text class="d-t-sm" x="115" y="290" text-anchor="middle">dataset/cli.js</text>
+
+        <rect class="d-box-key" x="208" y="248" width="150" height="54" rx="3"></rect>
+        <text class="d-t-key" x="283" y="274" text-anchor="middle">read query index</text>
+        <text class="d-t-sm" x="283" y="290" text-anchor="middle">one request</text>
+
+        <rect class="d-box" x="376" y="248" width="150" height="54" rx="3"></rect>
+        <text class="d-t" x="451" y="274" text-anchor="middle">fetch document</text>
+        <text class="d-t-sm" x="451" y="290" text-anchor="middle">dataset/source.js</text>
+
+        <rect class="d-box-key" x="544" y="248" width="150" height="54" rx="3"></rect>
+        <text class="d-t-key" x="619" y="274" text-anchor="middle">build record</text>
+        <text class="d-t-sm" x="619" y="290" text-anchor="middle">markdown</text>
+
+        <rect class="d-box" x="712" y="248" width="150" height="54" rx="3"></rect>
+        <text class="d-t" x="787" y="274" text-anchor="middle">manifest</text>
+        <text class="d-t-sm" x="787" y="290" text-anchor="middle">dataset.js</text>
+
+        <line class="d-l" x1="192" y1="275" x2="204" y2="275" marker-end="url(#a1)"></line>
+        <line class="d-l" x1="360" y1="275" x2="372" y2="275" marker-end="url(#a1)"></line>
+        <line class="d-l" x1="528" y1="275" x2="540" y2="275" marker-end="url(#a1)"></line>
+        <line class="d-l" x1="696" y1="275" x2="708" y2="275" marker-end="url(#a1)"></line>
+
+        <text class="d-t-hd" x="40" y="330">bin/dataset.js</text>
+        <text class="d-t-sm" x="152" y="330">1,076 lines</text>
+      </svg>
+      <figcaption>
+        <b>Three of the five stages are the same job written twice.</b> The amber stages
+        are the real difference — how the URL list is discovered, and what the bytes are
+        turned into. Everything else is parallel implementation.
+      </figcaption>
+    </figure>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Concern</th><th>Implementations</th><th>Where</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Retry &amp; backoff</td><td class="num-cell">3</td><td><code>fetcher.js</code>, <code>assets.js</code>, <code>dataset/source.js</code></td><td class="tag-dup">duplicated</td></tr>
+          <tr><td>Incremental state</td><td class="num-cell">2</td><td><code>state.js</code>, dataset manifest</td><td class="tag-dup">duplicated</td></tr>
+          <tr><td>Run summary</td><td class="num-cell">2</td><td><code>report.js</code>, <code>collect.js</code></td><td class="tag-dup">duplicated</td></tr>
+          <tr><td>Scope filtering</td><td class="num-cell">2</td><td><code>utils/url.js</code>, <code>collect.js</code></td><td class="tag-dup">duplicated</td></tr>
+          <tr><td>CLI flags</td><td class="num-cell">2</td><td>10 flags defined in both CLIs</td><td class="tag-dup">duplicated</td></tr>
+          <tr><td>Rate limiting</td><td class="num-cell">1</td><td><code>rateLimiter.js</code></td><td class="tag-ok">shared</td></tr>
+          <tr><td>Concurrency</td><td class="num-cell">1</td><td><code>utils/misc.js</code></td><td class="tag-ok">shared</td></tr>
+          <tr><td>Logging</td><td class="num-cell">1</td><td><code>logger.js</code></td><td class="tag-ok">shared</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note measure">
+      <p>
+        <b>The duplication was not laziness.</b> <code>dataset/source.js</code> carries a
+        comment explaining exactly why it could not call <code>fetcher.js</code>: the
+        discovery fetcher deliberately cancels the body of any non-HTML response, which
+        is precisely the bytes the dataset needs. That is a real incompatibility — and it
+        is the signature of a missing abstraction, not a missing function call.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span>The idea: one narrow waist</h2>
+    <p class="kicker">Everything upstream produces it; everything downstream consumes it</p>
+
+    <div class="measure">
+      <p class="lede">
+        Pick one data structure — a <strong>Document</strong> — and make it the only thing
+        that crosses the middle of the system. Sources produce Documents. Sinks consume
+        Documents. Neither knows the other exists.
+      </p>
+      <p>
+        This is the trick the IP layer plays in the network stack, and it buys the same
+        thing here: adding a source costs one adapter, not one adapter per output format.
+        Four sources and four sinks is eight pieces to write, not sixteen.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 760 424" role="img" aria-label="An hourglass: four sources converge into a single Document record, which then fans out to four sinks. Adding a source costs one adapter rather than one per output.">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw" points="0,1 10,5 0,9"></polygon>
+          </marker>
+          <marker id="a2k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw-key" points="0,1 10,5 0,9"></polygon>
+          </marker>
+        </defs>
+
+        <text class="d-t-hd" x="30" y="24">SOURCES</text>
+
+        <rect class="d-box" x="30" y="40" width="152" height="46" rx="3"></rect>
+        <text class="d-t" x="106" y="61" text-anchor="middle">sitemap crawl</text>
+        <text class="d-t-sm" x="106" y="76" text-anchor="middle">links + robots</text>
+
+        <rect class="d-box" x="198" y="40" width="152" height="46" rx="3"></rect>
+        <text class="d-t" x="274" y="61" text-anchor="middle">query index</text>
+        <text class="d-t-sm" x="274" y="76" text-anchor="middle">Edge Delivery</text>
+
+        <rect class="d-box" x="366" y="40" width="152" height="46" rx="3"></rect>
+        <text class="d-t" x="442" y="61" text-anchor="middle">URL list</text>
+        <text class="d-t-sm" x="442" y="76" text-anchor="middle">a text file</text>
+
+        <rect class="d-box-plain" x="534" y="40" width="152" height="46" rx="3"></rect>
+        <text class="d-t-sm" x="610" y="61" text-anchor="middle">browser session</text>
+        <text class="d-t-sm" x="610" y="76" text-anchor="middle">the extension</text>
+
+        <path class="d-l" d="M106 88 L106 150 L340 150 L340 176" marker-end="url(#a2)"></path>
+        <path class="d-l" d="M274 88 L274 150 L360 150 L360 176" marker-end="url(#a2)"></path>
+        <path class="d-l" d="M442 88 L442 150 L400 150 L400 176" marker-end="url(#a2)"></path>
+        <path class="d-l" d="M610 88 L610 150 L420 150 L420 176" marker-end="url(#a2)"></path>
+
+        <rect class="d-waist" x="212" y="182" width="336" height="62" rx="4"></rect>
+        <text class="d-t-key" x="380" y="207" text-anchor="middle" style="font-size:14px">Document</text>
+        <text class="d-t-sm" x="380" y="226" text-anchor="middle">id · url · version · meta · text · sha256</text>
+
+        <text class="d-t-sm" x="566" y="205">the only thing</text>
+        <text class="d-t-sm" x="566" y="221">crossing the middle</text>
+
+        <path class="d-l-key" d="M340 244 L340 274 L106 274 L106 300" marker-end="url(#a2k)"></path>
+        <path class="d-l-key" d="M360 244 L360 274 L274 274 L274 300" marker-end="url(#a2k)"></path>
+        <path class="d-l-key" d="M400 244 L400 274 L442 274 L442 300" marker-end="url(#a2k)"></path>
+        <path class="d-l-key" d="M420 244 L420 274 L610 274 L610 300" marker-end="url(#a2k)"></path>
+
+        <rect class="d-box" x="30" y="304" width="152" height="46" rx="3"></rect>
+        <text class="d-t" x="106" y="325" text-anchor="middle">dataset.jsonl</text>
+        <text class="d-t-sm" x="106" y="340" text-anchor="middle">one line per doc</text>
+
+        <rect class="d-box" x="198" y="304" width="152" height="46" rx="3"></rect>
+        <text class="d-t" x="274" y="325" text-anchor="middle">files on disk</text>
+        <text class="d-t-sm" x="274" y="340" text-anchor="middle">markdown/ · raw-html/</text>
+
+        <rect class="d-box" x="366" y="304" width="152" height="46" rx="3"></rect>
+        <text class="d-t" x="442" y="325" text-anchor="middle">manifest</text>
+        <text class="d-t-sm" x="442" y="340" text-anchor="middle">what ran, what failed</text>
+
+        <rect class="d-box-plain" x="534" y="304" width="152" height="46" rx="3"></rect>
+        <text class="d-t-sm" x="610" y="325" text-anchor="middle">vector store</text>
+        <text class="d-t-sm" x="610" y="340" text-anchor="middle">chunk → embed</text>
+
+        <text class="d-t-hd" x="30" y="376">SINKS</text>
+        <text class="d-t-sm" x="30" y="400">Dashed = not built yet. Adding either costs one adapter, not one per counterpart.</text>
+      </svg>
+      <figcaption>
+        <b>N + M adapters instead of N × M.</b> The Document record is already half-built —
+        it is the shape <code>dataset.jsonl</code> writes today. Promoting it from
+        “the dataset format” to “the system contract” is most of the work.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span>Four stages, four contracts</h2>
+    <p class="kicker">The plug points</p>
+
+    <div class="measure">
+      <p>
+        Between source and sink sit two more stages worth naming separately, because both
+        already exist twice and both are where site-specific behaviour lives.
+      </p>
+      <p>
+        The contracts matter more than the code. Note especially that a <strong>source
+        yields references, not content</strong> — that single decision is what makes
+        incremental refresh possible, because the version can be checked before paying
+        for a fetch.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 880 330" role="img" aria-label="The pipeline drawn as five stages: Source yields DocRefs, Policy admits or rejects them, Fetch returns a Payload, Transform produces a Document, Sink writes it. A shared runtime bar underneath provides rate limiting, retries, versioning and the manifest.">
+        <defs>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw" points="0,1 10,5 0,9"></polygon>
+          </marker>
+        </defs>
+
+        <text class="d-t-sm" x="30" y="22">query-index</text>
+        <text class="d-t-sm" x="30" y="38">sitemap-crawl</text>
+        <text class="d-t-sm" x="30" y="54">url-list</text>
+
+        <text class="d-t-sm" x="212" y="22">robots.txt</text>
+        <text class="d-t-sm" x="212" y="38">noindex column</text>
+        <text class="d-t-sm" x="212" y="54">include / exclude</text>
+
+        <text class="d-t-sm" x="388" y="22">http-text</text>
+        <text class="d-t-sm" x="388" y="38">http-binary</text>
+        <text class="d-t-sm" x="388" y="54">browser-capture</text>
+
+        <text class="d-t-sm" x="560" y="22">markdown</text>
+        <text class="d-t-sm" x="560" y="38">html-to-text</text>
+        <text class="d-t-sm" x="560" y="54">pdf-to-text</text>
+
+        <text class="d-t-sm" x="732" y="22">jsonl</text>
+        <text class="d-t-sm" x="732" y="38">files</text>
+        <text class="d-t-sm" x="732" y="54">vector</text>
+
+        <line class="d-l" x1="30" y1="66" x2="146" y2="66" stroke-dasharray="2 3"></line>
+        <line class="d-l" x1="212" y1="66" x2="320" y2="66" stroke-dasharray="2 3"></line>
+        <line class="d-l" x1="388" y1="66" x2="500" y2="66" stroke-dasharray="2 3"></line>
+        <line class="d-l" x1="560" y1="66" x2="672" y2="66" stroke-dasharray="2 3"></line>
+        <line class="d-l" x1="732" y1="66" x2="844" y2="66" stroke-dasharray="2 3"></line>
+
+        <rect class="d-box" x="30" y="96" width="132" height="58" rx="3"></rect>
+        <text class="d-t" x="96" y="122" text-anchor="middle">Source</text>
+        <text class="d-t-sm" x="96" y="139" text-anchor="middle">discover()</text>
+
+        <rect class="d-box" x="212" y="96" width="120" height="58" rx="3"></rect>
+        <text class="d-t" x="272" y="122" text-anchor="middle">Policy</text>
+        <text class="d-t-sm" x="272" y="139" text-anchor="middle">admit()</text>
+
+        <rect class="d-box" x="382" y="96" width="126" height="58" rx="3"></rect>
+        <text class="d-t" x="445" y="122" text-anchor="middle">Fetch</text>
+        <text class="d-t-sm" x="445" y="139" text-anchor="middle">fetch()</text>
+
+        <rect class="d-box" x="558" y="96" width="126" height="58" rx="3"></rect>
+        <text class="d-t" x="621" y="122" text-anchor="middle">Transform</text>
+        <text class="d-t-sm" x="621" y="139" text-anchor="middle">transform()</text>
+
+        <rect class="d-box-key" x="734" y="96" width="116" height="58" rx="3"></rect>
+        <text class="d-t-key" x="792" y="122" text-anchor="middle">Sink</text>
+        <text class="d-t-sm" x="792" y="139" text-anchor="middle">write()</text>
+
+        <line class="d-l" x1="162" y1="125" x2="208" y2="125" marker-end="url(#a3)"></line>
+        <text class="d-t-sm" x="185" y="116" text-anchor="middle">DocRef</text>
+
+        <line class="d-l" x1="332" y1="125" x2="378" y2="125" marker-end="url(#a3)"></line>
+        <text class="d-t-sm" x="355" y="116" text-anchor="middle">DocRef</text>
+
+        <line class="d-l" x1="508" y1="125" x2="554" y2="125" marker-end="url(#a3)"></line>
+        <text class="d-t-sm" x="531" y="116" text-anchor="middle">Payload</text>
+
+        <line class="d-l-key" x1="684" y1="125" x2="730" y2="125" marker-end="url(#a3)"></line>
+        <text class="d-t-key" x="707" y="116" text-anchor="middle">Document</text>
+
+        <line class="d-l-dash" x1="272" y1="154" x2="272" y2="186"></line>
+        <text class="d-t-warn" x="282" y="180">rejected, with a reason</text>
+
+        <rect class="d-box" x="30" y="220" width="820" height="52" rx="3"></rect>
+        <text class="d-t-hd" x="48" y="243">SHARED RUNTIME</text>
+        <text class="d-t-sm" x="48" y="261">rate limiting · retry + backoff · version check · manifest · logging · dry-run</text>
+        <text class="d-t-sm" x="640" y="252">written once, used by every stage</text>
+
+        <line class="d-l" x1="96" y1="154" x2="96" y2="216" stroke-dasharray="2 3"></line>
+        <line class="d-l" x1="445" y1="154" x2="445" y2="216" stroke-dasharray="2 3"></line>
+        <line class="d-l" x1="792" y1="154" x2="792" y2="216" stroke-dasharray="2 3"></line>
+
+        <text class="d-t-sm" x="30" y="300">Each stage is a module with one method. The runtime below is the part that is</text>
+        <text class="d-t-sm" x="30" y="316">written three times today.</text>
+      </svg>
+      <figcaption>
+        <b>The arrow labels are the contracts.</b> A source hands over a reference; only
+        after Policy admits it and the version check says it is stale does anything pay
+        for a fetch.
+      </figcaption>
+    </figure>
+
+    <pre><code><span class="c">// A source yields references, never content. This is the load-bearing choice:</span>
+<span class="c">// it lets the runtime skip a fetch entirely when the version is unchanged.</span>
+<span class="k">type</span> DocRef = {
+  id:      string        <span class="c">// stable identity, usually the URL</span>
+  url:     string
+  version: string | null <span class="c">// lastModified | etag | hash — drives refresh</span>
+  meta:    object        <span class="c">// title, description, section, whatever the source knows</span>
+}
+
+<span class="k">interface</span> Source    { discover(ctx): AsyncIterable&lt;DocRef&gt; }
+<span class="k">interface</span> Policy    { admit(ref, ctx): { ok: boolean, reason?: string } }
+<span class="k">interface</span> Fetcher   { fetch(ref, ctx): Promise&lt;Payload&gt; }
+<span class="k">interface</span> Transform { transform(payload, ref, ctx): Promise&lt;Document&gt; }
+
+<span class="c">// Sinks are streaming, not array-in. Today collect.js holds every record in</span>
+<span class="c">// memory — fine at 181 documents, not at 100,000.</span>
+<span class="k">interface</span> Sink {
+  open(ctx): Promise&lt;void&gt;
+  write(doc: Document): Promise&lt;void&gt;
+  close(): Promise&lt;Result&gt;
+}</code></pre>
+
+    <div class="note measure">
+      <p>
+        <b>Two details worth arguing about now rather than later.</b> Transforms should
+        compose as an array (<code>[html-to-text, normalise]</code>), so a PDF and a web
+        page can share the tail of the chain. And <code>version</code> should accept a
+        content hash as well as a timestamp, so sources with no <code>lastModified</code>
+        are not condemned to refetch forever — the gap the dataset collector has today.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span>Refresh, generalised</h2>
+    <p class="kicker">The mechanism that makes a rerun cost 1.7 seconds</p>
+
+    <div class="measure">
+      <p>
+        The dataset collector already does this and it is the single most valuable
+        behaviour in the codebase: rerunning is the update, and unchanged documents are
+        never fetched again. It is currently welded to one source. Lifting it into the
+        runtime gives every source the same property for free — including the crawler,
+        which has no equivalent today.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 820 300" role="img" aria-label="Refresh flow: the source yields references with versions, the runtime compares each against the manifest, unchanged documents are reused from the store while changed and new ones are fetched, both paths merge into the sinks, and the manifest is rewritten.">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw" points="0,1 10,5 0,9"></polygon>
+          </marker>
+          <marker id="a4k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw-key" points="0,1 10,5 0,9"></polygon>
+          </marker>
+        </defs>
+
+        <rect class="d-box" x="24" y="112" width="126" height="56" rx="3"></rect>
+        <text class="d-t" x="87" y="136" text-anchor="middle">Source</text>
+        <text class="d-t-sm" x="87" y="153" text-anchor="middle">one request</text>
+
+        <line class="d-l" x1="150" y1="140" x2="196" y2="140" marker-end="url(#a4)"></line>
+        <text class="d-t-sm" x="173" y="131" text-anchor="middle">refs</text>
+
+        <rect class="d-box-key" x="200" y="106" width="150" height="68" rx="3"></rect>
+        <text class="d-t-key" x="275" y="132" text-anchor="middle">version check</text>
+        <text class="d-t-sm" x="275" y="149" text-anchor="middle">ref.version ==</text>
+        <text class="d-t-sm" x="275" y="163" text-anchor="middle">manifest.version ?</text>
+
+        <rect class="d-box-plain" x="200" y="222" width="150" height="44" rx="3"></rect>
+        <text class="d-t-sm" x="275" y="242" text-anchor="middle">manifest</text>
+        <text class="d-t-sm" x="275" y="257" text-anchor="middle">last run's versions</text>
+        <line class="d-l" x1="275" y1="222" x2="275" y2="178" marker-end="url(#a4)"></line>
+
+        <path class="d-l" d="M350 128 L400 128 L400 62 L446 62" marker-end="url(#a4)"></path>
+        <text class="d-t-sm" x="404" y="54">same → reuse, no request</text>
+
+        <path class="d-l-key" d="M350 152 L400 152 L400 210 L446 210" marker-end="url(#a4k)"></path>
+        <text class="d-t-key" x="404" y="202">changed or new → fetch</text>
+
+        <rect class="d-box" x="450" y="40" width="148" height="44" rx="3"></rect>
+        <text class="d-t" x="524" y="60" text-anchor="middle">stored document</text>
+        <text class="d-t-sm" x="524" y="75" text-anchor="middle">read from the sink</text>
+
+        <rect class="d-box" x="450" y="188" width="148" height="44" rx="3"></rect>
+        <text class="d-t" x="524" y="208" text-anchor="middle">fetch + transform</text>
+        <text class="d-t-sm" x="524" y="223" text-anchor="middle">the only cost</text>
+
+        <path class="d-l" d="M598 62 L648 62 L648 128 L682 128" marker-end="url(#a4)"></path>
+        <path class="d-l" d="M598 210 L648 210 L648 152 L682 152" marker-end="url(#a4)"></path>
+
+        <rect class="d-box-key" x="686" y="106" width="110" height="68" rx="3"></rect>
+        <text class="d-t-key" x="741" y="136" text-anchor="middle">Sinks</text>
+        <text class="d-t-sm" x="741" y="153" text-anchor="middle">merged write</text>
+
+        <path class="d-l-dash" d="M741 174 L741 244 L350 244"></path>
+        <text class="d-t-warn" x="470" y="262" text-anchor="middle">manifest rewritten · documents absent from the source are dropped</text>
+      </svg>
+      <figcaption>
+        <b>Measured on aem.live:</b> full collection 19s for 181 documents; the same
+        command with nothing changed, 1.7s and zero document requests.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span>Where RAG plugs in</h2>
+    <p class="kicker">A sink, not a second pipeline</p>
+
+    <div class="measure">
+      <p class="lede">
+        This is the payoff, and the reason the waist is worth building. Retrieval does not
+        need its own collector, its own crawler, or its own refresh logic. It needs the
+        Document stream, and two more stages bolted to the end of it.
+      </p>
+      <p>
+        You deliberately left chunking out of collection, and that call holds up under
+        this design: chunk boundaries depend on the embedding model's window and on how
+        the retriever scores overlap, so they belong to the retrieval engine. Under a
+        narrow waist that is not a compromise — the chunker reads the same Documents
+        everything else does, and you can rebuild the index with different boundaries
+        without re-fetching a single page.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 800 306" role="img" aria-label="The Document stream feeds three sinks in parallel: the JSONL file, the markdown files, and a RAG sink that chunks, embeds and upserts into a vector store. Re-indexing reads from the stored documents rather than re-fetching the site.">
+        <defs>
+          <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw" points="0,1 10,5 0,9"></polygon>
+          </marker>
+          <marker id="a5k" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <polygon class="d-arw-key" points="0,1 10,5 0,9"></polygon>
+          </marker>
+        </defs>
+
+        <rect class="d-waist" x="24" y="112" width="128" height="64" rx="4"></rect>
+        <text class="d-t-key" x="88" y="140" text-anchor="middle">Document</text>
+        <text class="d-t-sm" x="88" y="158" text-anchor="middle">stream</text>
+
+        <path class="d-l" d="M152 132 L192 132 L192 52 L232 52" marker-end="url(#a5)"></path>
+        <path class="d-l" d="M152 144 L192 144 L192 130 L232 130" marker-end="url(#a5)"></path>
+        <path class="d-l-key" d="M152 156 L192 156 L192 224 L232 224" marker-end="url(#a5k)"></path>
+
+        <rect class="d-box" x="236" y="30" width="152" height="44" rx="3"></rect>
+        <text class="d-t" x="312" y="50" text-anchor="middle">dataset.jsonl</text>
+        <text class="d-t-sm" x="312" y="65" text-anchor="middle">built today</text>
+
+        <rect class="d-box" x="236" y="108" width="152" height="44" rx="3"></rect>
+        <text class="d-t" x="312" y="128" text-anchor="middle">markdown/</text>
+        <text class="d-t-sm" x="312" y="143" text-anchor="middle">built today</text>
+
+        <rect class="d-box-key" x="236" y="186" width="540" height="76" rx="4"></rect>
+        <text class="d-t-hd" x="252" y="208">RAG SINK</text>
+
+        <rect class="d-box" x="352" y="196" width="116" height="42" rx="3"></rect>
+        <text class="d-t" x="410" y="215" text-anchor="middle">chunk</text>
+        <text class="d-t-sm" x="410" y="230" text-anchor="middle">by heading</text>
+
+        <line class="d-l" x1="468" y1="217" x2="500" y2="217" marker-end="url(#a5)"></line>
+
+        <rect class="d-box" x="504" y="196" width="116" height="42" rx="3"></rect>
+        <text class="d-t" x="562" y="215" text-anchor="middle">embed</text>
+        <text class="d-t-sm" x="562" y="230" text-anchor="middle">batched</text>
+
+        <line class="d-l" x1="620" y1="217" x2="652" y2="217" marker-end="url(#a5)"></line>
+
+        <rect class="d-box" x="656" y="196" width="106" height="42" rx="3"></rect>
+        <text class="d-t" x="709" y="215" text-anchor="middle">upsert</text>
+        <text class="d-t-sm" x="709" y="230" text-anchor="middle">by doc id</text>
+
+        <text class="d-t-sm" x="252" y="228">not built</text>
+        <text class="d-t-sm" x="252" y="243">yet</text>
+
+        <path class="d-l-dash" d="M312 152 L312 172 L336 172"></path>
+        <text class="d-t-warn" x="396" y="170">re-index reads stored documents — no site traffic</text>
+
+        <text class="d-t-sm" x="24" y="292">Changing chunk size re-runs the bottom row only. The corpus above it is untouched.</text>
+      </svg>
+      <figcaption>
+        <b>Retrieval attaches to the stream; collection never learns about it.</b> Swapping
+        the vector store, or re-chunking at a different size, touches one sink and costs
+        no requests to the site.
+      </figcaption>
+    </figure>
+
+    <div class="measure">
+      <p>
+        The <code>upsert by doc id</code> detail is what makes refresh work end to end.
+        Because a Document has a stable <code>id</code> and a <code>sha256</code>, the RAG
+        sink can delete-then-insert the chunks for exactly the documents that changed, and
+        drop the chunks of documents that left the site. Without a stable id, every refresh
+        is a full re-index.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">06</span>A pipeline becomes a recipe</h2>
+    <p class="kicker">Where “very easily” actually comes from</p>
+
+    <div class="measure">
+      <p>
+        Once the stages are plugs, a pipeline is configuration. Both of today's commands
+        become recipes, and a new site becomes a file rather than a module.
+      </p>
+    </div>
+
+    <pre><code><span class="c"># recipes/aem-live.yml — replaces bin/dataset.js for this site</span>
+<span class="k">name:</span> aem-live
+<span class="k">source:</span>   { type: query-index, site: https://www.aem.live }
+<span class="k">policy:</span>
+  - noindex-column          <span class="c"># the publisher's own signal</span>
+  - exclude: ^/drafts/
+<span class="k">fetch:</span>    { type: http-text, suffix: .md }
+<span class="k">transform:</span> [ markdown ]
+<span class="k">sinks:</span>
+  - { type: jsonl, path: archive/www.aem.live/dataset.jsonl }
+  - { type: files, path: archive/www.aem.live/markdown }</code></pre>
+
+    <pre><code><span class="c"># recipes/aem-live-pages.yml — replaces bin/archive.js for this site</span>
+<span class="k">name:</span> aem-live-pages
+<span class="k">source:</span>   { type: sitemap-crawl, start: https://www.aem.live/, depth: 10 }
+<span class="k">policy:</span>   [ robots-txt, { include: ^https://www\.aem\.live/developer/ } ]
+<span class="k">fetch:</span>    { type: browser-capture, reveal: true }
+<span class="k">sinks:</span>    [ { type: files, path: archive/www.aem.live/raw-html } ]</code></pre>
+
+    <div class="flag">
+      <span class="flag-label">Build this last, not first</span>
+      The recipe layer is the most attractive part of this plan and the easiest to get
+      wrong. A registry and a config schema written for two pipelines will encode the
+      wrong assumptions. Write the stages as plain modules first, wire them in JavaScript,
+      and only introduce YAML once a third recipe exists and the shape has stopped moving.
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">07</span>Getting there without a rewrite</h2>
+    <p class="kicker">Four phases, each one shippable on its own</p>
+
+    <div class="measure">
+      <p>
+        Nothing below requires a big-bang migration. Both CLIs keep working throughout;
+        each phase deletes duplication that is already proven, and stops if you decide the
+        next phase is not worth it.
+      </p>
+    </div>
+
+    <div class="phases">
+      <div class="phase">
+        <div class="phase-n">01</div>
+        <div>
+          <h4>Extract the shared runtime</h4>
+          <p>
+            One HTTP client with retry, backoff and <code>Retry-After</code> handling,
+            parameterised by whether the body is wanted. This is the fix for the comment
+            in <code>dataset/source.js</code> explaining why it could not reuse
+            <code>fetcher.js</code> — three implementations become one.
+          </p>
+          <p class="ships"><b>Ships:</b> no behaviour change, ~200 lines deleted, both CLIs untouched externally.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-n">02</div>
+        <div>
+          <h4>Promote Document and the manifest</h4>
+          <p>
+            Move the record shape out of <code>dataset/dataset.js</code> into a shared
+            module, add <code>version</code> alongside <code>lastModified</code>, and make
+            the manifest generic. Point the crawler's report at it so both pipelines
+            describe their runs the same way.
+          </p>
+          <p class="ships"><b>Ships:</b> the crawler gains incremental refresh, which it does not have today.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-n">03</div>
+        <div>
+          <h4>Split the stages behind the existing CLIs</h4>
+          <p>
+            Refactor both commands to run <code>Source → Policy → Fetch → Transform → Sink</code>
+            internally, keeping every current flag working. Sinks become streaming here, which
+            is what lifts the ceiling above “fits in memory”.
+          </p>
+          <p class="ships"><b>Ships:</b> identical CLI surface; the test suite is the proof it did not regress.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-n">04</div>
+        <div>
+          <h4>Add the third source, then the recipe layer</h4>
+          <p>
+            A plain URL-list source is the cheapest honest test of whether the seams are in
+            the right place. If it drops in without touching the runtime, the abstraction
+            holds and the recipe format is worth writing. If it does not, you have learned
+            that for the price of one small module.
+          </p>
+          <p class="ships"><b>Ships:</b> the decision on whether to go further, backed by evidence.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">08</span>What it buys, concretely</h2>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Today</th><th>After</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Collect a second Edge Delivery site</td>
+            <td>Rerun the CLI with flags</td>
+            <td>Same — already easy</td>
+          </tr>
+          <tr>
+            <td>Collect from a site with no query index</td>
+            <td>Use the crawler; get 1 MB HTML pages, no refresh</td>
+            <td>Swap the source; keep Markdown output and refresh</td>
+          </tr>
+          <tr>
+            <td>Add PDF documents to the corpus</td>
+            <td>New fetch path, new transform, new record writer</td>
+            <td>One transform module</td>
+          </tr>
+          <tr>
+            <td>Build the RAG index</td>
+            <td>A new consumer that re-reads and re-parses the JSONL</td>
+            <td>A sink on the existing stream</td>
+          </tr>
+          <tr>
+            <td>Re-chunk at a different size</td>
+            <td>Re-fetch or re-parse everything</td>
+            <td>Re-run one sink; no site traffic</td>
+          </tr>
+          <tr>
+            <td>Give the crawler incremental refresh</td>
+            <td>Write a third state mechanism</td>
+            <td>Free — it is in the runtime</td>
+          </tr>
+          <tr>
+            <td>Fix a retry bug</td>
+            <td>Fix it in three files, hope you found all three</td>
+            <td>One file</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">09</span>What I would resist</h2>
+
+    <div class="measure">
+      <p>
+        <strong>Do not build a plugin framework.</strong> Two pipelines do not justify
+        dynamic loading, lifecycle hooks, or a plugin API with versioning. Plain modules in
+        a folder, imported by name, cover everything described here. Every abstraction
+        above should be deletable in an afternoon if it turns out to be wrong.
+      </p>
+      <p>
+        <strong>Do not unify the two CLIs into one command.</strong> <code>archive</code>
+        and <code>dataset</code> mean genuinely different things to whoever types them, and
+        the ten shared flags can be shared without merging the commands. A single
+        <code>harness run</code> with a mode flag would be worse for the user and no better
+        for the code.
+      </p>
+      <p>
+        <strong>Do not let the waist get wide.</strong> The moment a Document grows a field
+        that only one sink reads, the contract has started leaking, and the N + M property
+        quietly reverts to N × M. Source-specific data has a home already — the
+        <code>indexFields</code> escape hatch — and it should stay there.
+      </p>
+      <p>
+        <strong>Weigh the honest cost.</strong> 3,546 lines work today and are covered by
+        170 tests. Phase 1 pays for itself immediately. Phases 3 and 4 are worth doing only
+        if a third source is actually coming — if aem.live is the whole job, stop after
+        phase 2 and keep the duplication.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">10</span>What I need from you</h2>
+    <div class="measure">
+      <ul class="tight">
+        <li><strong>Is a third source real?</strong> That single answer decides whether this stops at phase 2 or runs to phase 4.</li>
+        <li><strong>Which vector store?</strong> The sink contract is the same either way, but batching and upsert semantics differ enough to matter.</li>
+        <li><strong>Retrieval or training?</strong> You have said RAG; if a training corpus is also in scope, deduplication and long-document handling belong in the plan and are not there now.</li>
+        <li><strong>How large does this get?</strong> Streaming sinks are phase 3 work. If the corpus stays in the low thousands, that phase can be deferred indefinitely.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="end">
+    Proposal only — no code changed. Figures for aem.live measured during this session:
+    181 documents, 1.8 MB of Markdown, 19s cold, 1.7s warm.<br>
+    Duplication counts taken from the working tree at commit a316c73.
+  </footer>
+
+</div>
