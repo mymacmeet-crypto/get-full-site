@@ -142,7 +142,11 @@ async function saveTabs(tabs, options = {}) {
 				title: tab.title
 			};
 			if (options.autoSave) {
-				if (await autoSaveIsEnabled(tab)) {
+				// explicitSave is a click, not the automatic archiving that Stop and
+				// Manual mode switch off — "Save now" and "Download selected" have to
+				// work in both. Without it they went through autoSaveIsEnabled() and
+				// silently did nothing the moment the archiver was stopped.
+				if (options.explicitSave || await autoSaveIsEnabled(tab)) {
 					const taskInfo = addTask({
 						status: TASK_PROCESSING_STATE,
 						tab: tabData,

@@ -26,6 +26,7 @@
 import * as config from "./config.js";
 import * as tabsData from "./tabs-data.js";
 import { isPaused } from "./archive-pause.js";
+import { isManual } from "./archive-settings.js";
 
 export {
 	autoSaveIsEnabled,
@@ -40,9 +41,15 @@ async function autoSaveIsEnabled(tab) {
 		if (await isPaused()) {
 			return false;
 		}
-		// Auto Archiver fork: auto-save is otherwise always armed — it no longer
-		// depends on the tabsData.autoSaveAll flag. Per-site opt-out stays
-		// possible by mapping a URL rule to the disabled profile.
+		// Manual mode. Same answer, different reason: the machinery stays running
+		// — a download the user asked for is still retried by the queue poller —
+		// but a page does not capture itself just because it was visited.
+		if (await isManual()) {
+			return false;
+		}
+		// Web Archiver fork: auto-save is otherwise always armed — it no longer depends
+		// on the tabsData.autoSaveAll flag. Per-site opt-out stays possible by
+		// mapping a URL rule to the disabled profile.
 		const rule = await config.getRule(tab.url);
 		return !rule || rule.autoSaveProfile != config.DISABLED_PROFILE_NAME;
 	}

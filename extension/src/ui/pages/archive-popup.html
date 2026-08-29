@@ -3,52 +3,103 @@
 
 <head>
 	<meta charset="utf-8">
-	<title>Auto Archiver</title>
+	<title>Web Archiver</title>
 	<style>
+		:root {
+			--bg: #1d1d20;
+			--surface: #26262b;
+			--line: #34343a;
+			--text: #eee;
+			--muted: #9aa0a6;
+			--accent: #3b82f6;
+			--accent-hover: #2563eb;
+			--danger: #f28b82;
+			--ok: #81c995;
+		}
+
 		body {
 			font: 13px/1.5 system-ui, sans-serif;
-			width: 340px;
+			width: 380px;
 			margin: 0;
+			padding: 0;
+			background: var(--bg);
+			color: var(--text);
+		}
+
+		section {
 			padding: 10px 12px;
-			background: #1d1d20;
-			color: #eee;
+			border-bottom: 1px solid var(--line);
 		}
 
-		h1 {
-			font-size: 13px;
-			margin: 0 0 8px;
+		section:last-of-type {
+			border-bottom: 0;
+		}
+
+		/* ---- header ---------------------------------------------------- */
+
+		header {
 			display: flex;
-			justify-content: space-between;
 			align-items: center;
+			gap: 8px;
+			padding: 10px 12px;
+			border-bottom: 1px solid var(--line);
 		}
 
-		#saveNowButton {
+		header img {
+			width: 18px;
+			height: 18px;
+		}
+
+		header h1 {
+			font-size: 13px;
+			font-weight: 600;
+			margin: 0;
+			flex: 1;
+		}
+
+		/* ---- the folder warning, in place of the setup page that used to
+		       open itself on every browser start ---------------------------- */
+
+		#folderWarning {
+			display: none;
+			gap: 8px;
+			align-items: center;
+			background: #3a2a1c;
+			color: #fdd663;
+			border-bottom: 1px solid var(--line);
+			padding: 9px 12px;
+		}
+
+		#folderWarning.visible {
+			display: flex;
+		}
+
+		#folderWarning span {
+			flex: 1;
+		}
+
+		#chooseFolderButton {
 			font: inherit;
-			background: #1A73E8;
-			color: #fff;
+			font-weight: 600;
+			flex: none;
+			background: #fdd663;
+			color: #3a2a1c;
 			border: 0;
 			border-radius: 6px;
-			padding: 4px 10px;
+			padding: 4px 9px;
 			cursor: pointer;
 		}
 
-		#saveNowButton:hover {
-			background: #1765cc;
+		#chooseFolderButton:hover {
+			background: #fce293;
 		}
 
-		#saveNowButton:disabled {
-			background: #3c4043;
-			color: #999;
-			cursor: default;
-		}
+		/* ---- switch and segmented controls ------------------------------ */
 
 		.switch {
 			display: flex;
 			gap: 8px;
 			align-items: center;
-			padding: 0 4px 9px;
-			margin-bottom: 9px;
-			border-bottom: 1px solid #333;
 		}
 
 		#powerButton {
@@ -63,7 +114,7 @@
 
 		#powerButton[data-state="running"] {
 			background: #3c2326;
-			color: #f28b82;
+			color: var(--danger);
 		}
 
 		#powerButton[data-state="running"]:hover {
@@ -72,7 +123,7 @@
 
 		#powerButton[data-state="stopped"] {
 			background: #1e3a29;
-			color: #81c995;
+			color: var(--ok);
 		}
 
 		#powerButton[data-state="stopped"]:hover {
@@ -87,81 +138,270 @@
 		#powerStatus {
 			flex: 1;
 			font-size: 12px;
-			color: #999;
+			color: var(--muted);
 		}
 
 		#powerStatus strong {
-			color: #eee;
+			color: var(--text);
 			font-weight: 600;
+		}
+
+		.row {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-top: 9px;
+		}
+
+		.row > label {
+			width: 52px;
+			color: var(--muted);
+			font-size: 12px;
+		}
+
+		.segmented {
+			display: flex;
+			flex: 1;
+			background: var(--surface);
+			border: 1px solid var(--line);
+			border-radius: 6px;
+			overflow: hidden;
+		}
+
+		.segmented button {
+			flex: 1;
+			font: inherit;
+			background: transparent;
+			color: var(--muted);
+			border: 0;
+			padding: 4px 0;
+			cursor: pointer;
+		}
+
+		.segmented button:hover:not([aria-pressed="true"]) {
+			background: #2f2f35;
+			color: var(--text);
+		}
+
+		.segmented button[aria-pressed="true"] {
+			background: var(--accent);
+			color: #fff;
+			font-weight: 600;
+		}
+
+		.segmented button:disabled {
+			cursor: default;
+			opacity: .5;
+		}
+
+		#modeHint {
+			margin: 7px 0 0;
+			font-size: 11px;
+			color: var(--muted);
+		}
+
+		/* ---- the open-tab list ------------------------------------------ */
+
+		#listHeader {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 9px 12px 5px;
+			font-size: 12px;
+			color: var(--muted);
+		}
+
+		#selectAll {
+			font: inherit;
+			background: none;
+			border: 0;
+			color: #8ab4f8;
+			cursor: pointer;
+			padding: 0;
 		}
 
 		ul {
 			list-style: none;
 			margin: 0;
-			padding: 0;
-			max-height: 320px;
+			padding: 0 0 4px;
+			max-height: 260px;
 			overflow-y: auto;
 		}
 
 		li {
-			padding: 6px 4px;
-			border-top: 1px solid #333;
 			display: flex;
 			gap: 8px;
-			align-items: baseline;
+			align-items: flex-start;
+			padding: 5px 12px;
+			cursor: pointer;
 		}
 
-		.file {
+		li:hover {
+			background: var(--surface);
+		}
+
+		li input {
+			margin: 3px 0 0;
+			accent-color: var(--accent);
+			flex: none;
+		}
+
+		li .body {
 			flex: 1;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
+			min-width: 0;
 		}
 
-		.url {
+		li .title {
 			display: block;
-			color: #999;
-			font-size: 11px;
 			overflow: hidden;
 			text-overflow: ellipsis;
-		}
-
-		.time {
-			color: #999;
-			font-size: 11px;
 			white-space: nowrap;
 		}
 
-		.empty {
-			color: #999;
-			padding: 12px 4px;
+		li .url {
+			display: block;
+			color: var(--muted);
+			font-size: 11px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		li .status {
+			flex: none;
+			font-size: 11px;
+			color: var(--muted);
+			white-space: nowrap;
+			padding-top: 1px;
+		}
+
+		li .status[data-status="DOWNLOADED"] {
+			color: var(--ok);
+		}
+
+		li .status[data-status="FAILED"] {
+			color: var(--danger);
+		}
+
+		li.empty {
+			color: var(--muted);
+			cursor: default;
+			padding: 14px 12px;
+		}
+
+		li.empty:hover {
+			background: none;
+		}
+
+		/* ---- actions ----------------------------------------------------- */
+
+		.actions {
+			display: flex;
+			gap: 8px;
+			padding: 9px 12px;
+			border-top: 1px solid var(--line);
+		}
+
+		.actions button {
+			font: inherit;
+			border: 0;
+			border-radius: 6px;
+			padding: 6px 10px;
+			cursor: pointer;
+		}
+
+		#downloadButton {
+			flex: 1;
+			background: var(--accent);
+			color: #fff;
+			font-weight: 600;
+		}
+
+		#downloadButton:hover:not(:disabled) {
+			background: var(--accent-hover);
+		}
+
+		#saveNowButton {
+			background: var(--surface);
+			color: var(--text);
+			border: 1px solid var(--line);
+		}
+
+		#saveNowButton:hover:not(:disabled) {
+			background: #2f2f35;
+		}
+
+		.actions button:disabled {
+			background: #3c4043;
+			color: #888;
+			border-color: transparent;
+			cursor: default;
 		}
 
 		footer {
-			margin-top: 8px;
-			border-top: 1px solid #333;
-			padding-top: 6px;
+			padding: 7px 12px 9px;
+			border-top: 1px solid var(--line);
+			font-size: 12px;
+			color: var(--muted);
 		}
 
 		footer a {
 			color: #8ab4f8;
 			cursor: pointer;
 			text-decoration: none;
-			font-size: 12px;
 		}
 	</style>
 </head>
 
 <body>
-	<div class="switch">
-		<button id="powerButton" data-state="running" disabled>…</button>
-		<span id="powerStatus">Checking…</span>
+	<header>
+		<img src="../resources/icon_32.png" alt="">
+		<h1>Web Archiver</h1>
+	</header>
+
+	<div id="folderWarning">
+		<span>No archive folder connected — nothing is being saved.</span>
+		<button id="chooseFolderButton">Choose folder…</button>
 	</div>
-	<h1><span>Saved from this tab</span><button id="saveNowButton">Save now</button></h1>
-	<ul id="historyList">
+
+	<section>
+		<div class="switch">
+			<button id="powerButton" data-state="running" disabled>…</button>
+			<span id="powerStatus">Checking…</span>
+		</div>
+		<div class="row">
+			<label id="modeLabel">Mode</label>
+			<div class="segmented" role="group" aria-labelledby="modeLabel">
+				<button data-setting="mode" data-value="auto" aria-pressed="false">Auto</button>
+				<button data-setting="mode" data-value="manual" aria-pressed="false">Manual</button>
+			</div>
+		</div>
+		<div class="row">
+			<label id="formatLabel">Format</label>
+			<div class="segmented" role="group" aria-labelledby="formatLabel">
+				<button data-setting="format" data-value="html" aria-pressed="false">HTML</button>
+				<button data-setting="format" data-value="md" aria-pressed="false">MD</button>
+				<button data-setting="format" data-value="both" aria-pressed="false">Both</button>
+			</div>
+		</div>
+		<p id="modeHint"></p>
+	</section>
+
+	<div id="listHeader">
+		<span id="listCount">Open tabs</span>
+		<button id="selectAll">Select all</button>
+	</div>
+	<ul id="tabList">
 		<li class="empty">Loading…</li>
 	</ul>
+
+	<div class="actions">
+		<button id="downloadButton" disabled>Download selected</button>
+		<button id="saveNowButton">Save this page</button>
+	</div>
+
 	<footer><a id="setupLink">Setup &amp; session log</a> &nbsp;·&nbsp; <a id="healthLink">Health</a></footer>
+
 	<script type="module" src="../bg/ui-archive-popup.js"></script>
 </body>
 

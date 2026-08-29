@@ -1,5 +1,5 @@
 /*
- * Auto Archiver — health & performance page. Combines machine-wide readings
+ * Web Archiver — health & performance page. Combines machine-wide readings
  * (chrome.system.cpu / chrome.system.memory) with the extension's own
  * workload metrics served by the background (autoArchive.getHealth).
  */

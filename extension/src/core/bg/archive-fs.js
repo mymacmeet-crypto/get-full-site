@@ -1,5 +1,5 @@
 /*
- * Auto Archiver — File System Access layer.
+ * Web Archiver — File System Access layer.
  *
  * Runs only in contexts that have DOM/window (the offscreen document and the
  * setup page), never in the service worker: FileSystemWritableFileStream is
@@ -11,6 +11,11 @@
  *     session.txt   — one line per URL: url <TAB> STATUS <TAB> time <TAB> attempts
  *     debug.log     — timestamped trace of what the extension did
  *     pages/        — the saved HTML files
+ *     markdown/     — the same pages as .md, when the format asks for it
+ *
+ * HTML and Markdown live in sibling directories rather than side by side in
+ * one, so that "give me the corpus" is a directory rather than a glob — which
+ * is what the crawler's dataset tooling downstream expects.
  */
 
 /* global indexedDB, fetch */
@@ -22,6 +27,7 @@ const FOLDER_KEY = "folder";
 const SESSION_FILE = "session.txt";
 const DEBUG_FILE = "debug.log";
 const PAGES_DIR = "pages";
+const MARKDOWN_DIR = "markdown";
 const TEXT_FILES = new Set([SESSION_FILE, DEBUG_FILE]);
 const SESSION_PREFIX = "session_";
 const LEGACY_FILES = ["queue.txt", "queue-failed.txt", "debug.log"];
@@ -34,12 +40,14 @@ export {
 	SESSION_FILE,
 	DEBUG_FILE,
 	PAGES_DIR,
+	MARKDOWN_DIR,
 	getState,
 	setFolderHandle,
 	getFolderHandle,
 	requestFolderPermission,
 	createSession,
 	writePage,
+	writeMarkdown,
 	readTextFile,
 	writeTextFile,
 	appendTextFile
@@ -185,6 +193,28 @@ function writePage(session, blobURL, filename) {
 		await writable.write(blob);
 		await writable.close();
 		return { filename: finalName, bytes: blob.size };
+	});
+}
+
+/**
+ * Write the Markdown of a page into `markdown/`.
+ *
+ * `unique` is false when this is the second half of a "both" save: the HTML
+ * write has already resolved any name collision, and the Markdown has to take
+ * that same resolved name so the pair stays together. Uniquifying twice would
+ * give you page_2.html beside page.md and quietly break the correspondence.
+ */
+function writeMarkdown(session, text, filename, { unique = true } = {}) {
+	return serialized(async () => {
+		const folder = await getWritableFolder();
+		const directory = await (await getSessionDir(folder, session))
+			.getDirectoryHandle(MARKDOWN_DIR, { create: true });
+		const finalName = unique ? await uniqueFilename(directory, filename) : filename;
+		const fileHandle = await directory.getFileHandle(finalName, { create: true });
+		const writable = await fileHandle.createWritable();
+		await writable.write(text);
+		await writable.close();
+		return { filename: finalName, bytes: text.length };
 	});
 }
 

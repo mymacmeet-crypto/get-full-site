@@ -26,6 +26,8 @@
 import "./../../../lib/chrome-browser-polyfill.js";
 import * as yabson from "./../../lib/yabson/yabson.js";
 import * as archiveFs from "./archive-fs.js";
+import { htmlToMarkdown, isMarkdownAvailable } from "./archive-markdown.js";
+import { fetchNativeMarkdown } from "./archive-native-md.js";
 
 const singlefile = globalThis.singlefile;
 const parsers = new Map(), pendingData = new Map();
@@ -51,7 +53,7 @@ setInterval(async () => {
 	}
 }, QUEUE_POLL_INTERVAL_MS);
 
-browser.runtime.onMessage.addListener(async ({ method, truncated, finished, requestId, url, data, mimeType, options, width, height, tabId, filename, text, session }) => {
+browser.runtime.onMessage.addListener(async ({ method, truncated, finished, requestId, url, data, mimeType, options, width, height, tabId, filename, text, session, html, pageUrl, title, unique }) => {
 	if (method == "archiveGetState") {
 		return archiveFs.getState();
 	}
@@ -80,6 +82,34 @@ browser.runtime.onMessage.addListener(async ({ method, truncated, finished, requ
 	if (method == "archiveWritePage") {
 		try {
 			return await archiveFs.writePage(session, url, filename);
+		} catch (error) {
+			return { error: error.message };
+		}
+	}
+	if (method == "archiveWriteMarkdown") {
+		try {
+			return await archiveFs.writeMarkdown(session, text, filename, { unique });
+		} catch (error) {
+			return { error: error.message };
+		}
+	}
+	if (method == "archiveToMarkdown") {
+		// The site's own authored Markdown beats anything converted from its
+		// rendered DOM, so it is asked for first — once per host, and never for a
+		// URL with a query string. Everything else falls through to conversion.
+		try {
+			if (!isMarkdownAvailable()) {
+				return { error: "markdown_library_missing" };
+			}
+			const native = await fetchNativeMarkdown(pageUrl);
+			if (native) {
+				return { markdown: native, source: "native" };
+			}
+			// A conversion scoped to the content root loses <title>, which lives in
+			// the <head> that root never contained. The md-only path has no captured
+			// pageData to take it from either, so read it back off the markup.
+			const heading = title || documentTitle(html);
+			return { markdown: htmlToMarkdown(html, { pageUrl, title: heading }), source: "converted" };
 		} catch (error) {
 			return { error: error.message };
 		}
@@ -179,6 +209,13 @@ browser.runtime.onMessage.addListener(async ({ method, truncated, finished, requ
 		return {};
 	}
 });
+
+// A regex rather than a parse: htmlToMarkdown is about to parse this string
+// anyway, and doing it twice for one attribute is not worth the megabytes.
+function documentTitle(html) {
+	const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html || "");
+	return match ? match[1].replace(/\s+/g, " ").trim() : null;
+}
 
 function saveToClipboard(pageData) {
 	const command = "copy";

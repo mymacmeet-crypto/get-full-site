@@ -41,6 +41,8 @@ export {
 	archiveGetMemory,
 	archiveCreateSession,
 	archiveWritePage,
+	archiveWriteMarkdown,
+	archiveToMarkdown,
 	archiveReadText,
 	archiveWriteText,
 	archiveAppendText
@@ -68,6 +70,26 @@ async function archiveCreateSession(session) {
 async function archiveWritePage(session, url, filename) {
 	await createOffscreenDocument();
 	const result = await browser.runtime.sendMessage({ method: "archiveWritePage", session, url, filename });
+	if (result && result.error) {
+		throw new Error(result.error);
+	}
+	return result;
+}
+
+async function archiveWriteMarkdown(session, text, filename, { unique = true } = {}) {
+	await createOffscreenDocument();
+	const result = await browser.runtime.sendMessage({ method: "archiveWriteMarkdown", session, text, filename, unique });
+	if (result && result.error) {
+		throw new Error(result.error);
+	}
+	return result;
+}
+
+// The conversion happens in the offscreen document because that is where the
+// DOM is: a service worker has no DOMParser, and Turndown needs one.
+async function archiveToMarkdown(html, pageUrl, title) {
+	await createOffscreenDocument();
+	const result = await browser.runtime.sendMessage({ method: "archiveToMarkdown", html, pageUrl, title });
 	if (result && result.error) {
 		throw new Error(result.error);
 	}

@@ -21,11 +21,25 @@
  *   Source.
  */
 
-/* global browser */
+/* global browser, chrome */
 
 import { queryTabs } from "./../../core/bg/tabs-util.js";
 import * as tabsData from "./../../core/bg/tabs-data.js";
 import { autoSaveIsEnabled } from "../../core/bg/autosave-util.js";
+import { isPaused } from "../../core/bg/archive-pause.js";
+import { getSettings } from "../../core/bg/archive-settings.js";
+
+// Read straight from storage rather than through auto-archive.js: importing
+// that here would pull the queue poller, the alarms and the offscreen document
+// into the UI module graph for the sake of one boolean.
+async function needsFolder() {
+	try {
+		const stored = await chrome.storage.session.get("autoArchiveNeedsFolder");
+		return Boolean(stored.autoArchiveNeedsFolder);
+	} catch {
+		return false;
+	}
+}
 
 const DEFAULT_ICON_PATH = "/src/ui/resources/icon_128.png";
 const WAIT_ICON_PATH_PREFIX = "/src/ui/resources/icon_128_wait";
@@ -47,6 +61,7 @@ const FORBIDDEN_COLOR = [255, 255, 255, 1];
 const ERROR_COLOR = [229, 4, 12, 192];
 const AUTOSAVE_DEFAULT_COLOR = [208, 208, 208, 192];
 const AUTOSAVE_INITIALIZING_COLOR = [64, 64, 64, 192];
+const PAUSED_COLOR = [95, 99, 104, 192];
 const INJECT_SCRIPTS_STEP = 1;
 
 const BUTTON_STATES = {
@@ -91,6 +106,27 @@ const BUTTON_STATES = {
 		setBadgeBackgroundColor: { color: FORBIDDEN_COLOR },
 		setBadgeText: { text: BUTTON_BLOCKED_BADGE_MESSAGE },
 		setTitle: { title: BUTTON_BLOCKED_TOOLTIP_MESSAGE },
+		setIcon: { path: DEFAULT_ICON_PATH }
+	},
+	paused: {
+		setBadgeBackgroundColor: { color: PAUSED_COLOR },
+		setBadgeText: { text: "off" },
+		setTitle: { title: "Web Archiver — stopped" },
+		setIcon: { path: DEFAULT_ICON_PATH }
+	},
+	manual: {
+		setBadgeBackgroundColor: { color: PAUSED_COLOR },
+		setBadgeText: { text: "man" },
+		setTitle: { title: "Web Archiver — manual mode; pick URLs in the popup" },
+		setIcon: { path: DEFAULT_ICON_PATH }
+	},
+	// Replaces the setup page this extension used to open by itself on every
+	// browser start. The badge says a folder is needed; the popup says what to
+	// do about it, when the user chooses to look.
+	needsFolder: {
+		setBadgeBackgroundColor: { color: ERROR_COLOR },
+		setBadgeText: { text: "!" },
+		setTitle: { title: "Web Archiver — choose an archive folder to start saving" },
 		setIcon: { path: DEFAULT_ICON_PATH }
 	},
 	autosave: {
@@ -226,6 +262,25 @@ function onProgress(tabId, index, maxIndex, tooltipMessage) {
 }
 
 async function refreshTab(tab) {
+	// Badge properties set with a tabId win over the global ones, so painting
+	// "default" here is what used to erase the popup's global "off" badge.
+	// Report the stopped state from the same place instead.
+	//
+	// Ordered by what the user most needs to know: an install with no folder
+	// saves nothing whatever the switch says, so that outranks both the mode
+	// and the switch.
+	if (await needsFolder()) {
+		await refresh(tab.id, getButtonState("needsFolder"));
+		return;
+	}
+	if (await isPaused()) {
+		await refresh(tab.id, getButtonState("paused"));
+		return;
+	}
+	if ((await getSettings()).mode == "manual") {
+		await refresh(tab.id, getButtonState("manual"));
+		return;
+	}
 	const autoSave = await autoSaveIsEnabled(tab);
 	const state = getButtonState("default", autoSave);
 	await refresh(tab.id, state);

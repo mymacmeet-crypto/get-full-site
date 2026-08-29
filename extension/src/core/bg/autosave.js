@@ -33,6 +33,7 @@ import * as woleet from "./../../lib/woleet/woleet.js";
 import { autoSaveIsEnabled } from "./autosave-util.js";
 import * as offscreen from "./offscreen.js";
 import * as autoArchive from "./auto-archive.js";
+import { wantsHtml, wantsMarkdown } from "./archive-settings.js";
 
 const pendingMessages = {};
 const replacedTabIds = {};
@@ -186,6 +187,74 @@ async function onInit(tab, message) {
 	}
 }
 
+/**
+ * Write one captured page into the session folder, in whichever formats the
+ * popup asked for.
+ *
+ * The Markdown is converted from `options.content` — the DOM as the content
+ * script preprocessed it — rather than from the captured file. At that point
+ * links and images still carry real URLs; the captured file has replaced them
+ * with inlined base64, which is exactly what a text corpus must not contain.
+ *
+ * A "both" save writes the HTML first and hands its *resolved* name to the
+ * Markdown write. Uniquifying the two independently would put page_2.html
+ * beside page.md and quietly break the correspondence between them.
+ *
+ * Returns the name and size to report to the popup, plus any pageData it had
+ * to capture itself so the caller can still revoke that blob.
+ */
+async function writeToArchive(options, pageData, { wantHtml, wantMarkdown }) {
+	const session = await autoArchive.getSession();
+	const baseName = autoArchive.filenameForUrl(options.url);
+	let filename = null, bytes = 0, captured = null;
+
+	if (wantHtml && pageData) {
+		const written = await offscreen.archiveWritePage(session, pageData.url, baseName);
+		filename = written && written.filename;
+		bytes = (written && written.bytes) || 0;
+		autoArchive.debugLog("save: file written:", filename);
+	}
+
+	if (wantMarkdown) {
+		const markdown = await toMarkdown(options, pageData);
+		if (markdown) {
+			const markdownName = (filename || baseName).replace(/\.html?$/i, "") + ".md";
+			const written = await offscreen.archiveWriteMarkdown(session, markdown, markdownName, { unique: !filename });
+			autoArchive.debugLog("save: markdown written:", written && written.filename);
+			if (!filename) {
+				filename = written && written.filename;
+				bytes = (written && written.bytes) || 0;
+			}
+		} else if (!wantHtml) {
+			// Nothing converted, and no HTML was asked for. Writing the capture is
+			// better than writing nothing: a page that converts to an empty document
+			// is worth having in some form rather than silently dropping.
+			autoArchive.debugLog("save: no markdown for", options.url, "— falling back to HTML");
+			captured = pageData || await offscreen.processPage(options);
+			const written = await offscreen.archiveWritePage(session, captured.url, baseName);
+			filename = written && written.filename;
+			bytes = (written && written.bytes) || 0;
+		}
+	}
+
+	return { filename, bytes, pageData: captured };
+}
+
+async function toMarkdown(options, pageData) {
+	try {
+		const result = await offscreen.archiveToMarkdown(options.content, options.url, pageData && pageData.title);
+		if (result && result.source == "native") {
+			autoArchive.debugLog("save: using the site's own .md for", options.url);
+		}
+		return (result && result.markdown) || "";
+	} catch (error) {
+		// A failed conversion must not fail the save: the HTML half of a "both"
+		// run is already on disk, and an md-only run falls back to writing it.
+		autoArchive.debugLog("save: markdown conversion failed for", options.url, "—", error.message);
+		return "";
+	}
+}
+
 async function saveContent(message, tab) {
 	const tabId = tab.id;
 	const options = await config.getOptions(tab.url, true);
@@ -221,10 +290,24 @@ async function saveContent(message, tab) {
 			if (options.autoSaveExternalSave) {
 				await companion.externalSave(options);
 			} else {
-				pageData = await offscreen.processPage(options);
 				const archiveReady = await autoArchive.isReady();
+				const [wantHtml, wantMarkdown] = await Promise.all([wantsHtml(), wantsMarkdown()]);
+				const cloudDestination = Boolean(options.saveToGDrive || options.saveWithWebDAV || options.saveWithMCP ||
+					options.saveToGitHub || options.saveToDropbox || options.saveWithCompanion ||
+					options.saveToRestFormApi || options.saveToS3);
+				// Markdown on its own needs no capture. It is converted from the DOM
+				// the content script already sent, so running the capture — inlining
+				// every image, font and stylesheet into one file — would produce a
+				// blob nothing then writes. On a media-heavy page that is most of the
+				// time the save takes.
+				// Cloud destinations and the Downloads fallback both want the file
+				// itself, so either of those still forces the capture.
+				const needsCapture = cloudDestination || !archiveReady || wantHtml || !wantMarkdown;
+				if (needsCapture) {
+					pageData = await offscreen.processPage(options);
+				}
 				let skipped;
-				if (!archiveReady && !options.saveToGDrive && !options.saveWithWebDAV && !options.saveWithMCP && !options.saveToGitHub && !options.saveToDropbox && !options.saveWithCompanion && !options.saveToRestFormApi && !options.saveToS3) {
+				if (!archiveReady && !cloudDestination) {
 					const testSkip = await downloads.testSkipSave(pageData.filename, options);
 					skipped = testSkip.skipped;
 					options.filenameConflictAction = testSkip.filenameConflictAction;
@@ -292,16 +375,17 @@ async function saveContent(message, tab) {
 							{ filenameConflictAction: options.filenameConflictAction }
 						);
 					} else if (archiveReady) {
-						const written = await offscreen.archiveWritePage(
-							await autoArchive.getSession(), pageData.url, autoArchive.filenameForUrl(options.url));
-						writtenFilename = written && written.filename;
-						writtenBytes = written && written.bytes;
-						autoArchive.debugLog("save: file written:", writtenFilename);
+						const written = await writeToArchive(options, pageData, { wantHtml, wantMarkdown });
+						writtenFilename = written.filename;
+						writtenBytes = written.bytes;
+						// the fallback below may have had to capture after all, and the
+						// blob it produced still needs revoking in the finally block
+						pageData = written.pageData || pageData;
 					} else {
 						autoArchive.debugLog("save: archive folder not ready, falling back to Downloads for", options.url);
 						await downloads.downloadPage(pageData, options);
 					}
-					if (options.openSavedPage) {
+					if (options.openSavedPage && pageData) {
 						const createTabProperties = { active: true, url: "/src/ui/pages/viewer.html?compressed=true&blobURI=" + pageData.url, windowId: tab.windowId };
 						const index = tab.index;
 						try {
@@ -313,7 +397,7 @@ async function saveContent(message, tab) {
 						}
 						browser.tabs.create(createTabProperties);
 					}
-					if (pageData.hash) {
+					if (pageData && pageData.hash) {
 						await woleet.anchor(pageData.hash, options.woleetKey);
 					}
 				}

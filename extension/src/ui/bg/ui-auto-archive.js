@@ -1,5 +1,5 @@
 /*
- * Auto Archiver — setup page logic. Runs as an unbundled ES module (like the
+ * Web Archiver — setup page logic. Runs as an unbundled ES module (like the
  * other src/ui/bg/ui-*.js pages) and talks to the same IndexedDB-persisted
  * folder handle as the offscreen document.
  */

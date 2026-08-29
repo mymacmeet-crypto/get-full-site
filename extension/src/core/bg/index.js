@@ -42,7 +42,16 @@ import * as autoArchive from "./auto-archive.js";
 import * as business from "./business.js";
 import * as ui from "./../../ui/bg/index.js";
 
-autoArchive.init({ saveUrls: business.saveUrls, saveTabs: business.saveTabs, isSavingUrl: business.isSavingUrl });
+autoArchive.init({
+	saveUrls: business.saveUrls,
+	saveTabs: business.saveTabs,
+	isSavingUrl: business.isSavingUrl,
+	// injected rather than imported: core/bg must not depend on ui/bg
+	refreshButtons: async () => {
+		const tabs = await browser.tabs.query({});
+		await Promise.all(tabs.map(tab => ui.refreshTab(tab).catch(() => { })));
+	}
+});
 
 browser.runtime.onMessage.addListener((message, sender) => {
 	if (message.method.startsWith("autoArchive.")) {

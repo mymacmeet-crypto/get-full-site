@@ -42,6 +42,7 @@ import * as yabson from "./../../lib/yabson/yabson.js";
 import { RestFormApi } from "../../lib/../lib/rest-form-api/index.js";
 import * as offscreen from "./offscreen.js";
 import * as autoArchive from "./auto-archive.js";
+import { wantsHtml, wantsMarkdown } from "./archive-settings.js";
 
 const partialContents = new Map();
 const tabData = new Map();
@@ -194,6 +195,61 @@ async function downloadTabPage(message, tab) {
 	return {};
 }
 
+/*
+ * Write a page saved through the manual / queue-replay pipeline into the
+ * session folder, honouring the chosen format.
+ *
+ * This is the second of the two save pipelines: autosave.js handles a page that
+ * captures itself, this one handles a URL reopened in a background tab. Both
+ * end up in the archive folder, and only this one used to ignore the format
+ * setting — so anything the queue poller retried was written as HTML however
+ * the popup was set.
+ *
+ * The Markdown here is converted from the *captured* file rather than from the
+ * live DOM, because that is all this pipeline ever receives. The conversion
+ * drops inlined data: images, so the result is close; a page that reaches this
+ * path and publishes its own .md still gets that instead, which is better than
+ * either.
+ */
+async function writeToArchive(message, pageUrl) {
+	const session = await autoArchive.getSession();
+	const baseName = autoArchive.filenameForUrl(pageUrl);
+	const [wantHtml, wantMarkdown] = await Promise.all([wantsHtml(), wantsMarkdown()]);
+	let written = null;
+
+	if (wantHtml || !wantMarkdown) {
+		written = await offscreen.archiveWritePage(session, message.url, baseName);
+	}
+
+	if (wantMarkdown) {
+		// compressed saves arrive as a zip, which has no DOM to convert
+		const convertible = typeof message.content == "string" && !message.compressContent;
+		let markdown = "";
+		if (convertible) {
+			try {
+				const result = await offscreen.archiveToMarkdown(message.content, pageUrl, message.title);
+				markdown = (result && result.markdown) || "";
+			} catch (error) {
+				autoArchive.debugLog("replay: markdown conversion failed for", pageUrl, "—", error.message);
+			}
+		}
+		if (markdown) {
+			const markdownName = ((written && written.filename) || baseName).replace(/\.html?$/i, "") + ".md";
+			const markdownWritten = await offscreen.archiveWriteMarkdown(
+				session, markdown, markdownName, { unique: !written });
+			autoArchive.debugLog("replay: markdown written:", markdownWritten && markdownWritten.filename);
+			written = written || markdownWritten;
+		} else if (!written) {
+			// Nothing converted and no HTML was asked for: write the capture rather
+			// than nothing, so the page is not silently lost.
+			autoArchive.debugLog("replay: no markdown for", pageUrl, "— falling back to HTML");
+			written = await offscreen.archiveWritePage(session, message.url, baseName);
+		}
+	}
+
+	return written;
+}
+
 async function downloadContent(message, tab) {
 	const tabId = tab.id;
 	try {
@@ -263,8 +319,7 @@ async function downloadContent(message, tab) {
 				});
 			} else if (await autoArchive.isReady()) {
 				const pageUrl = message.originalUrl || tab.url;
-				response = await offscreen.archiveWritePage(
-					await autoArchive.getSession(), message.url, autoArchive.filenameForUrl(pageUrl));
+				response = await writeToArchive(message, pageUrl);
 				await autoArchive.markSaved(pageUrl);
 				autoArchive.recordSaveMetric({ durationMs: null, bytes: response && response.bytes, filename: response && response.filename, ok: true });
 			} else {

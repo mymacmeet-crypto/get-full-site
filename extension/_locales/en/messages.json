@@ -1,6 +1,6 @@
 {
 	"extensionDescription": {
-		"message": "Save a complete page into a single HTML file",
+		"message": "Archive every page you visit as a single HTML file, Markdown, or both.",
 		"description": "Description of the extension."
 	},
 	"commandSaveSelectedTabs": {

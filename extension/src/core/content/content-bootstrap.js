@@ -40,7 +40,7 @@ browser.runtime.sendMessage({ method: "bootstrap.init" }).then(message => {
 	tabId = message.tabId;
 	tabIndex = message.tabIndex;
 	autoSaveEnabled = message.autoSaveEnabled;
-	console.log("[AutoArchiver] content script ready on", location.href, "| autoSaveEnabled:", autoSaveEnabled, "| autoSaveLoad:", optionsAutoSave && optionsAutoSave.autoSaveLoad); // eslint-disable-line no-console
+	console.log("[Web Archiver] content script ready on", location.href, "| autoSaveEnabled:", autoSaveEnabled, "| autoSaveLoad:", optionsAutoSave && optionsAutoSave.autoSaveLoad); // eslint-disable-line no-console
 	if (options && options.autoOpenEditor && detectSavedPage(document)) {
 		if (document.readyState == "loading") {
 			document.addEventListener("DOMContentLoaded", () => openEditor(document));
@@ -55,8 +55,18 @@ browser.runtime.sendMessage({ method: "bootstrap.init" }).then(message => {
 		}
 	}
 });
+// An explicit request — "Save now", or a URL ticked in the popup — has to get
+// through even when this tab was told autoSaveEnabled:false, which is what
+// Stop and Manual mode both leave behind. Gating it on autoSaveEnabled alone
+// meant the click reached the tab and was silently dropped here.
+function isSaveRequest(message) {
+	return message.method == "content.autosave" &&
+		(autoSaveEnabled || Boolean(message.options && message.options.explicitSave));
+}
+
 browser.runtime.onMessage.addListener(message => {
-	if ((autoSaveEnabled && message.method == "content.autosave") ||
+	if (isSaveRequest(message) ||
+		message.method == "content.ping" ||
 		message.method == "content.maybeInit" ||
 		message.method == "content.init" ||
 		message.method == "content.openEditor" ||
@@ -118,7 +128,14 @@ function executeBootstrap(data) {
 }
 
 async function onMessage(message) {
-	if (autoSaveEnabled && message.method == "content.autosave") {
+	// "is there still a content script in this tab?" — reloading the extension
+	// orphans the ones in tabs that were already open, and a save sent to one of
+	// those fails with a connection error that business.js deliberately ignores.
+	// The background asks first and reopens the URL instead when nobody answers.
+	if (message.method == "content.ping") {
+		return { alive: true };
+	}
+	if (isSaveRequest(message)) {
 		initAutoSavePage(message);
 		return {};
 	}
@@ -189,7 +206,7 @@ function init() {
 		pageAutoSaved = false;
 		stopScrollSnapshots();
 		previousLocationHref = location.href;
-		console.log("[AutoArchiver] announcing navigation to background:", location.href); // eslint-disable-line no-console
+		console.log("[Web Archiver] announcing navigation to background:", location.href); // eslint-disable-line no-console
 		// send location.href explicitly: it keeps the #fragment part, which
 		// tab.url can miss or lag behind on hash navigations
 		browser.runtime.sendMessage({ method: "tabs.init", url: location.href, savedPageDetected: detectSavedPage(document) }).catch(() => { });
@@ -197,36 +214,48 @@ function init() {
 	}
 }
 
-// small status badge (top-right) showing the archive state of this page
+/*
+ * The archive state of this page, as a small dot in the top-right corner.
+ *
+ * It used to be a full pill — a coloured lozenge reading "✅ Page saved" — which
+ * is the wrong size for something that appears on every page you visit and says
+ * nothing you asked to know. The state still has to be visible, so it is now a
+ * 22px disc with the icon and no text; the toolbar badge and the popup carry the
+ * detail for anyone who wants it. Hovering gives the wording back through the
+ * native tooltip, which costs no pixels.
+ */
 let statusOverlayElement, statusOverlayTimeout;
 function showArchiveStatus(status) {
 	const STYLES = {
-		queued: { label: "🕓 In queue…", background: "#B06000" },
-		downloading: { label: "⬇️ Saving page…", background: "#1A73E8" },
-		downloaded: { label: "✅ Page saved", background: "#188038" },
-		failed: { label: "⚠️ Save failed — will retry", background: "#D93025" }
+		queued: { icon: "🕓", title: "Web Archiver: in queue", background: "#B06000" },
+		downloading: { icon: "⬇", title: "Web Archiver: saving page…", background: "#1A73E8" },
+		downloaded: { icon: "✓", title: "Web Archiver: page saved", background: "#188038" },
+		failed: { icon: "!", title: "Web Archiver: save failed — will retry", background: "#D93025" }
 	};
 	try {
 		if (!document.body) {
 			document.addEventListener("DOMContentLoaded", () => showArchiveStatus(status), { once: true });
 			return;
 		}
-		const style = STYLES[status] || { label: status, background: "#333" };
+		const style = STYLES[status] || { icon: "•", title: "Web Archiver: " + status, background: "#333" };
 		if (!statusOverlayElement || !statusOverlayElement.isConnected) {
 			statusOverlayElement = document.createElement("div");
 			document.body.appendChild(statusOverlayElement);
 		}
 		statusOverlayElement.setAttribute("style",
-			"all: initial; position: fixed; top: 16px; right: 16px; z-index: 2147483647;" +
+			"all: initial; position: fixed; top: 12px; right: 12px; z-index: 2147483647;" +
+			"width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%;" +
 			"background: " + style.background + "; color: #fff;" +
-			"font: 600 14px/1.4 system-ui, sans-serif; letter-spacing: .2px;" +
-			"padding: 10px 16px; border-radius: 24px;" +
-			"box-shadow: 0 4px 14px rgba(0,0,0,.45), 0 0 0 2px rgba(255,255,255,.25);" +
-			"pointer-events: none; transition: opacity .4s; opacity: 1;");
-		statusOverlayElement.textContent = style.label;
+			"font: 600 12px/22px system-ui, sans-serif; text-align: center;" +
+			"box-shadow: 0 1px 4px rgba(0,0,0,.35), 0 0 0 1.5px rgba(255,255,255,.7);" +
+			"pointer-events: none; transition: opacity .4s; opacity: .92;");
+		statusOverlayElement.textContent = style.icon;
+		statusOverlayElement.title = style.title;
 		clearTimeout(statusOverlayTimeout);
+		// A finished state has nothing left to report, so it fades; an in-flight
+		// one stays until it changes.
 		if (status == "downloaded" || status == "failed") {
-			statusOverlayTimeout = setTimeout(() => statusOverlayElement.style.opacity = "0", 5000);
+			statusOverlayTimeout = setTimeout(() => statusOverlayElement.style.opacity = "0", 2500);
 		}
 	} catch {
 		// never let the badge break the page
@@ -234,9 +263,16 @@ function showArchiveStatus(status) {
 }
 
 async function initAutoSavePage(message) {
-	console.log("[AutoArchiver] auto-save capture starting for", location.href); // eslint-disable-line no-console
+	console.log("[Web Archiver] auto-save capture starting for", location.href); // eslint-disable-line no-console
 	showArchiveStatus("downloading");
 	optionsAutoSave = message.options;
+	if (optionsAutoSave.explicitSave) {
+		// The user asked for this page again. pageAutoSaved is what stops a page
+		// capturing itself twice, and leaving it set would make the second click
+		// do nothing at all.
+		pageAutoSaved = false;
+		autoSavingPage = false;
+	}
 	if (document.readyState != "complete") {
 		await new Promise(resolve => globalThis.addEventListener("load", resolve));
 	}
@@ -345,7 +381,7 @@ function maybeTakeScrollSnapshot() {
 		scrollSnapshotState.lastMaxScroll = globalThis.scrollY || 0;
 		scrollSnapshotState.lastTime = Date.now();
 		scrollSnapshotState.count++;
-		console.log("[AutoArchiver] scroll snapshot #" + scrollSnapshotState.count, "height:", scrollSnapshotState.lastHeight); // eslint-disable-line no-console
+		console.log("[Web Archiver] scroll snapshot #" + scrollSnapshotState.count, "height:", scrollSnapshotState.lastHeight); // eslint-disable-line no-console
 		pageAutoSaved = false;
 		autoSavingPage = false;
 		optionsAutoSave.autoSaveDelay = 0;

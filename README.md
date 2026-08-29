@@ -492,11 +492,16 @@ Flags and examples: [command.md](command.md#collecting-a-text-corpus).
 
 ## Browser extension
 
-`extension/` holds a second, complementary way to archive: a Chrome extension
-that saves pages **as you browse them**, rather than crawling a domain on
-demand. It is [SingleFile Auto
-Archiver](https://github.com/nayan-dey/singlefile-auto-archiver), a fork of
-SingleFile-MV3, checked in as source the same way the capture engine is.
+`extension/` holds a second, complementary way to archive: **Web Archiver**, a
+Chrome extension that saves pages **as you browse them**, rather than crawling a
+domain on demand. It is a fork of
+[SingleFile-MV3](https://github.com/gildas-lormeau/SingleFile-MV3) by way of
+[singlefile-auto-archiver](https://github.com/nayan-dey/singlefile-auto-archiver),
+checked in as source the same way the capture engine is.
+
+Its popup carries a Start/Stop switch, an Auto/Manual mode, an HTML/MD/Both
+format choice, and a list of every URL open in Chrome that you can tick and
+archive in one go. Full description in `extension/WEB-ARCHIVER.md`.
 
 ```bash
 # nothing to install — lib/ is the prebuilt bundle
@@ -509,7 +514,7 @@ The two halves do different jobs, and the split is worth understanding:
 |---|---|---|
 | decides what to take | crawler: sitemap, links, scope rules | you do, by visiting pages |
 | session state | anonymous fetches | your real browser — logins and cookies apply |
-| output | `archive/<domain>/site-data/`, nested and hash-deduped | `session_<date>_<time>/pages/` in a folder you pick |
+| output | `archive/<domain>/site-data/`, nested and hash-deduped | `session_<date>_<time>/pages/` and `/markdown/` in a folder you pick |
 | runs | when you invoke it | continuously, in the background |
 
 That middle row is the reason the extension is here at all: it captures the
@@ -520,12 +525,12 @@ The two do not share state today. The extension tracks work in a `session.txt`
 status file; nothing in `src/` reads that format, and `bin/archive.js` takes a
 start URL as a required argument rather than a URL list. Feeding one into the
 other means adding a list-ingest mode to the CLI — see
-`extension/AUTO-ARCHIVER.md` for the file format if you want to build that.
+`extension/WEB-ARCHIVER.md` for the file format if you want to build that.
 
 `extension/` carries no `package.json` and adds no dependency to this project.
 Chrome loads the bundles in `extension/lib/`, so **edits under
 `extension/src/core/` have no effect until those bundles are rebuilt** — the
-rebuild recipe is in `extension/AUTO-ARCHIVER.md`.
+rebuild recipe is in `extension/WEB-ARCHIVER.md`.
 
 ## How it works
 
@@ -811,13 +816,20 @@ Two things follow that are easy to miss:
 - **Renaming the directory changes nothing about authorship.** `capture-engine`
   is SingleFile. Its `LICENSE` and the AGPL headers in its sources are intact,
   and `vendor/capture-engine/NOTICE` records the version it came from and every
-  modification made to it. The same holds for `extension/`: the AGPL headers in
-  its sources are intact, its changes against upstream SingleFile-MV3 are listed
-  in `extension/AUTO-ARCHIVER.md`, and the root `LICENSE` is the same AGPL-3.0
-  text the fork ships, so no duplicate copy is kept inside `extension/`.
+  modification made to it. The same holds for `extension/`, which ships under
+  our own name as **Web Archiver**: the AGPL headers in its sources are intact,
+  its changes against upstream SingleFile-MV3 are listed in
+  `extension/WEB-ARCHIVER.md`, and the root `LICENSE` is the same AGPL-3.0 text
+  the fork ships, so no duplicate copy is kept inside `extension/`. The
+  extension's `manifest.json` carries no `author` or `homepage_url` for the same
+  reason it carries our name: the upstream fields would have claimed SingleFile's
+  identity for a build that is no longer theirs, and stripping the copyright
+  headers to fix that would have been the worse mistake.
 
 `vendor/simple-cdp` is **MIT** (© 2024 Gildas Lormeau) and imposes no copyleft
-of its own; its `LICENSE.txt` is kept alongside it.
+of its own; its `LICENSE.txt` is kept alongside it. `extension/lib/vendor/`
+holds Turndown and turndown-plugin-gfm, both **MIT**, copied verbatim by
+`tools/vendor-turndown.js` with their version recorded in the file header.
 
 `NOTICE` at the repository root summarises all of this.
 
