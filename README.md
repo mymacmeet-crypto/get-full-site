@@ -113,6 +113,44 @@ reaches the browser at all.
 
 Markdown always keeps live URLs; `--rewrite-links` applies to the HTML only.
 
+### Every document says where it came from
+
+Every `.md` file opens with the same header, whichever of the two sources
+produced it:
+
+```yaml
+---
+title: "Essentials by AAI: Car Insurance & Home Insurance"
+url: "https://www.essentialsbyaai.com.au/"
+fetched: 2026-08-30
+method: "Downloaded"
+---
+```
+
+`method` is `"Downloaded"` for a document the site published at `<path>.md` and
+`"Converted"` for one made from the rendered DOM. That is the field worth
+having: the two are not equally trustworthy — an authored source is what a
+person wrote, a conversion is our best reading of a rendered page — and once a
+file is sitting in a corpus there is nothing else left to tell them apart.
+`description` appears when the site's `Metadata` block supplies one.
+
+Values are always quoted and the date never is, rather than quoting only where
+YAML strictly requires it. Conditional quoting is correct YAML and gives every
+page a slightly different-looking header depending on whether its title happens
+to contain a colon; a corpus is easier to parse, and to trust, when the shape
+does not vary.
+
+The block is composed in exactly one place, `src/front-matter.js`. Four callers
+write `.md` files — the crawler's two sources and the extension's two save
+pipelines — and four implementations of one header would agree the day they were
+written and drift by the end of the month. The extension carries a verbatim port
+for the same reason it carries one of `src/eds-markdown.js`: it cannot `require`
+across into a CommonJS tree, and both halves write into the same corpus.
+
+A document the site published carrying front matter of its own has it replaced,
+not appended to. Two `---` blocks in one file is not richer metadata, it is a
+file whose second block is body text.
+
 ### What the cleanup actually removes
 
 **From the site's own Markdown.** `<path>.md` on an Edge Delivery site is the
@@ -128,17 +166,16 @@ table. So they are parsed instead (`src/eds-markdown.js`):
 
 | in the source | in the file |
 |---|---|
-| `Metadata` block | `title` and `description` become YAML front matter, with the page URL and the date it was fetched. Nav, Footer, Template and Category are site configuration and are dropped |
+| `Metadata` block | lifted out; `title` and `description` feed the front matter above, where the site's own answer outranks the page's `<title>`. Nav, Footer, Template and Category are site configuration and are dropped |
 | `Section Metadata` | dropped - it styles a section and can carry a `title` that would otherwise shadow the page's |
 | a real data table | a GFM table |
 | `Pagination`, `Breadcrumb`, `Gnav Brand`, … | dropped, the same way nav is dropped from a converted page. `Pagination` alone appears in 74 of the 183 |
 | any other block - `Feed`, `Columns`, `Hero`, `Cards` | unwrapped to its contents; the component name is not something the page says |
 
 Over the full 183 documents that is **32.6% fewer bytes and zero box-drawing
-lines left**, with 180 of them gaining a title in front matter. A site that
-serves plain Markdown rather than Edge Delivery blocks is passed through
-byte-identical - no front matter is invented for a document that carried no
-metadata block.
+lines left**, with 180 of them supplying a title for the header. A site that
+serves plain Markdown rather than Edge Delivery blocks has its body passed
+through byte-identical; only the header is added.
 
 **A listing page is the one case where conversion beats the site's own file.**
 `/blog`'s authored document holds an empty `Feed` block and not one of the

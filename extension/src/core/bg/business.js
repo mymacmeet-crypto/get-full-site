@@ -27,6 +27,7 @@ import * as config from "./config.js";
 import { autoSaveIsEnabled } from "./autosave-util.js";
 import * as editor from "./editor.js";
 import * as ui from "./../../ui/bg/index.js";
+import * as archiveWindow from "./archive-window.js";
 
 const ERROR_CONNECTION_ERROR_CHROMIUM = "Could not establish connection. Receiving end does not exist.";
 const ERROR_CONNECTION_LOST_CHROMIUM = "The message port closed before a response was received.";
@@ -115,6 +116,12 @@ async function saveUrls(urls, options = {}) {
 			Object.keys(options).forEach(key => tabOptions[key] = options[key]);
 			tabOptions.autoClose = true;
 			tabOptions.originalUrl = url;
+			// This path exists for URLs that are *not* open: nobody asked for a
+			// tab, they asked for an archived page. Unless the caller says
+			// otherwise, load it where it cannot be seen.
+			if (tabOptions.hiddenCapture === undefined) {
+				tabOptions.hiddenCapture = true;
+			}
 			addTask({
 				tab: { url },
 				status: TASK_PENDING_STATE,
@@ -296,7 +303,9 @@ async function runTask(taskInfo) {
 	if (!taskInfo.tab.id) {
 		let scriptsInjected;
 		try {
-			const tab = await createTabAndWaitUntilComplete({ url: taskInfo.tab.url, active: false });
+			const tab = await createTabAndWaitUntilComplete(
+				{ url: taskInfo.tab.url, active: false },
+				{ hidden: taskInfo.options.hiddenCapture });
 			taskInfo.tab.id = taskInfo.options.tabId = tab.id;
 			taskInfo.tab.index = taskInfo.options.tabIndex = tab.index;
 			ui.onStart(taskInfo.tab.id, INJECT_SCRIPTS_STEP);
@@ -367,6 +376,9 @@ function isSavingUrl(url) {
 // the tab is gone: cancel ALL its tasks, auto-save ones included — otherwise
 // they linger forever and block the archive queue poller for those URLs
 function onTabRemoved(tabId) {
+	// Whether the capture finished or the tab was closed under it, the hidden
+	// window has one fewer occupant — and closes itself once it has none.
+	archiveWindow.releaseTab(tabId);
 	Array.from(tasks).filter(taskInfo => taskInfo.tab.id == tabId)
 		.forEach(taskInfo => cancel(taskInfo, false));
 	runTasks();
@@ -452,8 +464,19 @@ async function injectScript(tabId, options = {}, retry = true) {
 	return scriptsInjected;
 }
 
-async function createTabAndWaitUntilComplete(createProperties) {
-	const tab = await browser.tabs.create(createProperties);
+/*
+ * Open a URL and resolve once its page has loaded.
+ *
+ * `hidden` puts the tab in the minimized window archive-window.js keeps, rather
+ * than in the user's own. Every capture of a URL that is not already open goes
+ * that way — the queue poller's retries and the popup's Download alike — and
+ * `processInForeground` is the one thing that overrides it, because that option
+ * exists precisely to let someone watch the capture happen.
+ */
+async function createTabAndWaitUntilComplete(createProperties, { hidden = false } = {}) {
+	const tab = hidden && !processInForeground
+		? await archiveWindow.createHiddenTab(createProperties.url)
+		: await browser.tabs.create(createProperties);
 	return new Promise((resolve, reject) => {
 		browser.tabs.onUpdated.addListener(onTabUpdated);
 		browser.tabs.onRemoved.addListener(onTabRemoved);

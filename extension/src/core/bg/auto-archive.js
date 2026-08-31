@@ -23,6 +23,7 @@ import * as offscreen from "./offscreen.js";
 import * as tabsData from "./tabs-data.js";
 import { isPaused, setPaused, heal } from "./archive-pause.js";
 import { getSettings, setSettings } from "./archive-settings.js";
+import { isHiddenTab, closeIfIdle } from "./archive-window.js";
 import { refreshAutoSaveTabs } from "./autosave-util.js";
 
 const BUILD_ID = "2026-08-29.1";
@@ -228,6 +229,11 @@ async function onMessage(message) {
 			refreshAutoSaveTabs().catch(() => { }),
 			refreshButtons ? refreshButtons().catch(() => { }) : Promise.resolve()
 		]);
+		if (result.paused) {
+			// Nothing more will be captured, so the hidden window has no reason to
+			// stay in the taskbar for the rest of the session.
+			closeIfIdle().catch(() => { });
+		}
 		debugLog(result.paused ? "stopped by user" : "started by user");
 		return result;
 	}
@@ -456,7 +462,11 @@ async function getTabList() {
 	const tabs = await browser.tabs.query({});
 	const rows = new Map();
 	for (const tab of tabs) {
-		if (!isArchivableUrl(tab.url)) {
+		// A capture in progress is not a tab the user opened — it lives in the
+		// hidden window and disappears again on its own. Listing it would offer
+		// the user a row that archives a page already being archived, and make
+		// rows appear and vanish under the pointer.
+		if (!isArchivableUrl(tab.url) || isHiddenTab(tab.id)) {
 			continue;
 		}
 		const existing = rows.get(tab.url);
@@ -508,7 +518,10 @@ async function downloadUrls(urls) {
 	const openTabs = await browser.tabs.query({});
 	const tabByUrl = new Map();
 	for (const tab of openTabs) {
-		if (!tabByUrl.has(tab.url)) {
+		// Never save "through" a hidden capture tab: it belongs to a capture
+		// already running, and handing it a second one would have the page save
+		// itself twice.
+		if (!tabByUrl.has(tab.url) && !isHiddenTab(tab.id)) {
 			tabByUrl.set(tab.url, tab);
 		}
 	}

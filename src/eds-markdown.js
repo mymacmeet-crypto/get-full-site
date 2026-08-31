@@ -310,21 +310,6 @@ function cleanBody(text, metadata, stats) {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-/** Quote a value for YAML only when it needs it. */
-function yamlValue(text) {
-  const value = String(text).replace(/\s*\n\s*/g, ' ').trim();
-  if (!value) return '""';
-  if (/^[A-Za-z0-9][\w .,'/()&-]*$/.test(value) && !/: /.test(value)) return value;
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-}
-
-/** Front matter, or '' when there is nothing worth putting in it. */
-function frontMatter(fields) {
-  const entries = Object.entries(fields).filter(([, value]) => value);
-  if (entries.length === 0) return '';
-  return ['---', ...entries.map(([key, value]) => `${key}: ${yamlValue(value)}`), '---', ''].join('\n');
-}
-
 /**
  * How much of this document is prose the reader came for.
  *
@@ -360,8 +345,16 @@ const MIN_PROSE_LENGTH = 350;
  * Returns `{ markdown, metadata, thin, stats }`. `thin` is the caller's cue to
  * convert the rendered page for this URL instead - the authored source is the
  * better document right up until the moment it is mostly empty blocks.
+ *
+ * `markdown` is the body alone. This used to compose front matter from the
+ * Metadata block, which meant a document had a header only when the site
+ * happened to publish one and the converted half of the corpus had none at
+ * all; the header is now built for every document by src/front-matter.js, out
+ * of `metadata` plus what the caller knows about where the file came from.
+ * `title` and `description` are the fields worth lifting from here - the rest
+ * of the block describes how the site renders the page, not what it says.
  */
-function cleanEdsMarkdown(text, { pageUrl = null, fetchedAt = null, frontMatter: wantFrontMatter = true } = {}) {
+function cleanEdsMarkdown(text, { fetchedAt = null } = {}) {
   const metadata = {};
   const stats = { blocks: 0, emptyBlocks: 0, chromeBlocks: 0, tables: 0 };
   const body = cleanBody(String(text || ''), metadata, stats);
@@ -371,23 +364,15 @@ function cleanEdsMarkdown(text, { pageUrl = null, fetchedAt = null, frontMatter:
   for (const key of KEPT_METADATA) {
     if (metadata[key]) kept[key] = metadata[key];
   }
-  // The provenance fields ride along with the descriptive ones rather than
-  // standing alone: a document that carried no Metadata block is a plain
-  // Markdown file the site published, and it leaves here byte-identical.
-  if (Object.keys(kept).length > 0) {
-    if (pageUrl) kept.url = pageUrl;
-    if (fetchedAt) kept.fetched = fetchedAt;
-  }
-
-  // A caller that already records title, description and URL as fields of its
-  // own - the dataset collector does - wants none of it repeated in the text,
-  // where it would only be embedded twice.
-  const header = wantFrontMatter ? frontMatter(kept) : '';
-  const markdown = `${header}${header ? '\n' : ''}${body}`.trim();
+  if (fetchedAt) kept.fetched = fetchedAt;
 
   return {
-    markdown,
+    markdown: body.trim(),
+    // Everything the Metadata block carried, for a caller that wants a field
+    // this one does not keep.
     metadata,
+    // The subset that belongs in a document header.
+    fields: kept,
     stats: { ...stats, proseLength: prose },
     // An empty block is the signature of content the site renders rather than
     // stores, so a thin document *with* one is the case worth converting; a

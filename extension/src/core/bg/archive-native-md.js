@@ -123,10 +123,15 @@ async function fetchOne(url) {
 }
 
 /**
- * The cleaned authored Markdown for `pageUrl`, or null when this site does not
- * publish it — or publishes one too thin to stand on its own, which is the
- * signature of a listing page whose items the site renders from an index. Both
- * are the caller's cue to convert the captured DOM instead.
+ * The cleaned authored Markdown for `pageUrl` as `{ markdown, fields }`, or
+ * null when this site does not publish it — or publishes one too thin to stand
+ * on its own, which is the signature of a listing page whose items the site
+ * renders from an index. Both are the caller's cue to convert the captured DOM
+ * instead.
+ *
+ * `fields` is what the document's own Metadata block said about itself: the
+ * site knows its title and description better than the <title> tag does, so
+ * those go into the front matter ahead of anything scraped.
  *
  * Never throws: a page with no Markdown is the ordinary case, not an error.
  */
@@ -170,12 +175,12 @@ function clean(text, pageUrl) {
 	if (text === null || text === undefined) {
 		return null;
 	}
-	const result = cleanEdsMarkdown(text, { pageUrl, fetchedAt: new Date().toISOString() });
+	const result = cleanEdsMarkdown(text);
 	// An authored document that is mostly empty blocks describes a page the
 	// site assembles at render time; the captured DOM is the better source for
 	// that one even though this host publishes Markdown for the rest.
 	if (result.thin || !result.markdown.trim()) {
 		return null;
 	}
-	return result.markdown;
+	return { markdown: result.markdown, fields: result.fields, pageUrl };
 }

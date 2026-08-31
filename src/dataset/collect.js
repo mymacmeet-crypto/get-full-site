@@ -206,7 +206,7 @@ async function collect(config) {
     const isMarkdown = config.extension === '.md';
     const text =
       isMarkdown && config.cleanBlocks !== false
-        ? cleanEdsMarkdown(result.text, { frontMatter: false }).markdown
+        ? cleanEdsMarkdown(result.text).markdown
         : result.text;
 
     if (!text.trim()) {

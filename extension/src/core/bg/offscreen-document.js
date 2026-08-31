@@ -28,6 +28,7 @@ import * as yabson from "./../../lib/yabson/yabson.js";
 import * as archiveFs from "./archive-fs.js";
 import { htmlToMarkdown, isMarkdownAvailable } from "./archive-markdown.js";
 import { fetchNativeMarkdown } from "./archive-native-md.js";
+import { withFrontMatter, METHOD_DOWNLOADED, METHOD_CONVERTED } from "./front-matter.js";
 
 const singlefile = globalThis.singlefile;
 const parsers = new Map(), pendingData = new Map();
@@ -97,19 +98,39 @@ browser.runtime.onMessage.addListener(async ({ method, truncated, finished, requ
 		// The site's own authored Markdown beats anything converted from its
 		// rendered DOM, so it is asked for first — once per host, and never for a
 		// URL with a query string. Everything else falls through to conversion.
+		//
+		// This is the one place the extension turns a page into a .md, so it is
+		// also the one place the front matter is composed — both save pipelines
+		// go through here, which is what keeps their documents identical in shape.
 		try {
 			if (!isMarkdownAvailable()) {
 				return { error: "markdown_library_missing" };
-			}
-			const native = await fetchNativeMarkdown(pageUrl);
-			if (native) {
-				return { markdown: native, source: "native" };
 			}
 			// A conversion scoped to the content root loses <title>, which lives in
 			// the <head> that root never contained. The md-only path has no captured
 			// pageData to take it from either, so read it back off the markup.
 			const heading = title || documentTitle(html);
-			return { markdown: htmlToMarkdown(html, { pageUrl, title: heading }), source: "converted" };
+			const native = await fetchNativeMarkdown(pageUrl);
+			if (native) {
+				return {
+					source: "native",
+					markdown: withFrontMatter(native.markdown, {
+						// the site's own Metadata block outranks the page's <title>
+						title: native.fields.title || heading,
+						description: native.fields.description,
+						url: pageUrl,
+						method: METHOD_DOWNLOADED
+					})
+				};
+			}
+			return {
+				source: "converted",
+				markdown: withFrontMatter(htmlToMarkdown(html, { pageUrl, title: heading }), {
+					title: heading,
+					url: pageUrl,
+					method: METHOD_CONVERTED
+				})
+			};
 		} catch (error) {
 			return { error: error.message };
 		}

@@ -35,6 +35,12 @@ const {
 const { htmlToMarkdown } = require('./markdown');
 const { NativeMarkdown } = require('./native-md');
 const { cleanEdsMarkdown } = require('./eds-markdown');
+const {
+  withFrontMatter,
+  today,
+  METHOD_DOWNLOADED,
+  METHOD_CONVERTED,
+} = require('./front-matter');
 const { formatDuration, mapWithConcurrency } = require('./utils/misc');
 
 const STATE_SAVE_INTERVAL = 10; // pages between periodic state saves
@@ -104,7 +110,9 @@ class Crawler {
       : null;
     // Stamped into the front matter of every document taken from the site, so
     // a corpus says when it was collected without anyone consulting the report.
-    this.fetchedOn = new Date().toISOString().slice(0, 10);
+    // Local rather than UTC: east of Greenwich the UTC date is yesterday's for
+    // the first hours of the morning, and the crawl was not run yesterday.
+    this.fetchedOn = today();
     this.archiver = new Archiver(
       config,
       this.logger,
@@ -621,10 +629,7 @@ class Crawler {
       // What the site publishes is an authoring document, not a finished one:
       // the prose is the author's own, but it arrives wrapped in the block
       // syntax the authoring tools use. See src/eds-markdown.js.
-      const cleaned = cleanEdsMarkdown(published, {
-        pageUrl: job.url,
-        fetchedAt: this.fetchedOn,
-      });
+      const cleaned = cleanEdsMarkdown(published, { fetchedAt: this.fetchedOn });
 
       if (cleaned.thin) {
         // A listing page: its blocks are filled in at render time, so the
@@ -641,6 +646,10 @@ class Crawler {
 
       job.markdown = cleaned.markdown;
       job.markdownSource = 'site';
+      // The site's own Metadata block knows the page's title and description
+      // better than the <title> tag the crawler scraped, so it wins where it
+      // has an answer.
+      job.markdownFields = cleaned.fields;
     });
   }
 
@@ -674,11 +683,23 @@ class Crawler {
       return null;
     }
 
+    // The one place a .md file is written on this side, so the one place the
+    // header is composed. Both sources pass through here, which is what keeps
+    // a downloaded document and a converted one carrying the same fields.
+    const fields = job.markdownFields || {};
+    const document = withFrontMatter(markdown, {
+      title: fields.title || job.title,
+      description: fields.description,
+      url: job.url,
+      fetched: this.fetchedOn,
+      method: job.markdownSource === 'site' ? METHOD_DOWNLOADED : METHOD_CONVERTED,
+    });
+
     try {
       await fs.promises.mkdir(path.dirname(job.markdownPath), { recursive: true });
       // One trailing newline: these are text files people and tools read line
       // by line, and a missing final newline is a papercut in both.
-      await fs.promises.writeFile(job.markdownPath, `${markdown}\n`, 'utf8');
+      await fs.promises.writeFile(job.markdownPath, `${document}\n`, 'utf8');
     } catch (error) {
       this.report.recordError(`could not write markdown for ${job.url}: ${error.message}`);
       this.logger.warn(`Could not write ${job.markdownName}: ${error.message}`);

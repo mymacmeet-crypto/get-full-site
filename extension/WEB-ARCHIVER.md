@@ -93,7 +93,25 @@ Manual mode: an explicit click is not the automatic archiving those switch off.
 **Download** captures each ticked URL through its own tab where it can, because
 that tab already holds the page as you see it — scrolled, logged in, with its
 scripts having run. It asks first (`content.ping`) and reopens the URL in a
-background tab when nothing answers. That matters more than it sounds: reloading
+background tab when nothing answers.
+
+**A reopened URL is loaded out of sight.** It used to appear in your own window
+as an inactive tab: it never took focus, but it was plainly visible, and
+archiving ten pages meant watching ten tabs come and go over what you were
+doing. They now load in a window of their own — created minimized and unfocused
+on first use, reused for everything after it, and closed once it has been idle
+for fifteen seconds or when you press Stop. Chrome treats a tab in a minimized
+window exactly as it treated an inactive one (`document.hidden`, throttled
+timers, a full page load), so the capture itself is unchanged.
+
+Every failure there falls back to the old visible tab rather than skipping the
+save, and `processInForeground` in the options page still overrides it — that
+setting exists precisely to let someone watch a capture happen.
+
+Tabs in that window are excluded from the popup's list and from Download's
+"is this URL already open?" lookup. They are captures in progress, not pages you
+opened: listing them would offer a row that archives a page already being
+archived, and picking one would have that page save itself twice. That matters more than it sounds: reloading
 the extension orphans the content script in every tab that was already open, and
 a save sent to one of those fails with a connection error that the task runner
 deliberately ignores — so before the probe, a batch download of pre-existing tabs
@@ -151,9 +169,28 @@ Two sources, in this order:
 2. **Conversion of the rendered DOM.** Everything else: site chrome stripped,
    content root extracted, GFM tables, relative URLs made absolute.
 
-Both paths are ports of the crawler's `src/markdown.js`, `src/native-md.js` and
-`src/eds-markdown.js` — same selectors, same thresholds, same Turndown
-configuration, so the extension and the CLI produce the same corpus.
+Every `.md` file opens with the same header, whichever source produced it:
+
+```yaml
+---
+title: "Essentials by AAI: Car Insurance & Home Insurance"
+url: "https://www.essentialsbyaai.com.au/"
+fetched: 2026-08-30
+method: "Downloaded"
+---
+```
+
+`method` is `"Downloaded"` for the site's own document and `"Converted"` for one
+made from the DOM — the two are not equally trustworthy, and once a file is in a
+corpus nothing else distinguishes them. `description` appears when the site's
+`Metadata` block supplies one. The block is composed in one place,
+`src/core/bg/front-matter.js`, which both save pipelines reach through
+`archiveToMarkdown`.
+
+Both paths are ports of the crawler's `src/markdown.js`, `src/native-md.js`,
+`src/eds-markdown.js` and `src/front-matter.js` — same selectors, same
+thresholds, same Turndown configuration, same header, so the extension and the
+CLI produce the same corpus.
 `src/eds-markdown.js` is pure string processing and was copied verbatim;
 `src/markdown.js` had every cheerio call replaced by the DOM method it was
 imitating, and its output is byte-identical on the same input.
@@ -174,9 +211,10 @@ rather than losing the page.
 Each run: drains URLs parked while the folder was unavailable, deduplicates,
 then replays every `QUEUE` entry older than 10 s and every `INPROGRESS` entry
 older than 5 minutes. At most 10 URLs per poll, at most 5 attempts before an
-entry becomes `FAILED`. A replayed URL is opened in a background tab so your
-logins and cookies apply, and `isReplaying` stops that tab's own page load from
-starting a second, duplicate save.
+entry becomes `FAILED`. A replayed URL is opened in the hidden window described
+above — in Chrome, so your logins and cookies apply, which is the whole reason
+this exists beside the CLI — and `isReplaying` stops that tab's own page load
+from starting a second, duplicate save.
 
 The poller returns immediately while stopped. Manual mode does **not** stop it —
 see the table above.
@@ -189,8 +227,10 @@ see the table above.
 | `src/core/bg/auto-archive.js` | **New.** Session and queue manager in the service worker: enqueues on navigation, tracks status, runs the poller, serves the popup's tab list and bulk download, opens nothing by itself. |
 | `src/core/bg/archive-pause.js` | **New.** The Start/Stop flag, the only writer of it, and `heal()` — a one-off repair for installs disarmed by a retired profile-flipping implementation of Stop. |
 | `src/core/bg/archive-settings.js` | **New.** The Auto/Manual mode and HTML/MD/Both format, cached in memory and invalidated by the storage change event. |
+| `src/core/bg/archive-window.js` | **New.** The minimized, unfocused window that reopened URLs are captured in, and its lifecycle. |
 | `src/core/bg/archive-markdown.js` | **New.** DOM port of the crawler's `src/markdown.js`. |
 | `src/core/bg/eds-markdown.js` | **New.** Verbatim port of the crawler's `src/eds-markdown.js`. |
+| `src/core/bg/front-matter.js` | **New.** Verbatim port of the crawler's `src/front-matter.js` — the header every `.md` file carries. |
 | `src/core/bg/archive-native-md.js` | **New.** The per-host `<path>.md` probe. |
 | `lib/vendor/turndown*.js` | **New.** Turndown's browser builds, loaded as `<script>` tags by `offscreen-document.html`; refreshed by `tools/vendor-turndown.js` in the parent repo. |
 | `src/core/bg/offscreen.js` / `offscreen-document.js` | Message plumbing for the archive operations, plus the 10-second queue ticker and Markdown conversion. |

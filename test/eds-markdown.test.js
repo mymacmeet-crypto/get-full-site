@@ -29,16 +29,19 @@ test('the grid parser reads a merged name row above differently sized rows', () 
   );
 });
 
-test('title and description become front matter, site configuration is dropped', () => {
-  const { markdown, metadata } = cleanEdsMarkdown(`# Heading\n\n${METADATA}`, {
-    pageUrl: 'https://www.aem.live/docs/authoring',
+test('title and description are offered as header fields, site configuration is not', () => {
+  // The block is lifted out and handed to the caller rather than rendered here:
+  // src/front-matter.js composes one header for every document, so that a
+  // converted page and a downloaded one carry the same fields.
+  const { markdown, metadata, fields } = cleanEdsMarkdown(`# Heading\n\n${METADATA}`, {
     fetchedAt: '2026-08-29',
   });
-  assert.match(markdown, /^---\ntitle: Authoring and Publishing Content\n/);
-  assert.match(markdown, /description: How to author, preview and publish content/);
-  assert.match(markdown, /url: "https:\/\/www\.aem\.live\/docs\/authoring"/);
-  assert.match(markdown, /fetched: 2026-08-29/);
+  assert.strictEqual(fields.title, 'Authoring and Publishing Content');
+  assert.match(fields.description, /^How to author, preview and publish content/);
+  assert.strictEqual(fields.fetched, '2026-08-29');
   // Nav and Template describe how the site renders the page, not what it says.
+  assert.ok(!('nav' in fields), 'Nav was offered as a header field');
+  assert.ok(!('template' in fields), 'Template was offered as a header field');
   assert.ok(!markdown.includes('/new-nav'), 'Nav leaked into the document');
   assert.ok(!markdown.includes('guides'), 'Template leaked into the document');
   // Still recorded, for a caller that wants them.
@@ -110,8 +113,8 @@ test('Section Metadata never shadows the document title', () => {
 +-------+---------------+
 | Title | The Real Page |
 +-------+---------------+`;
-  const { markdown } = cleanEdsMarkdown(source, { pageUrl: 'https://x.test/p' });
-  assert.match(markdown, /title: The Real Page/);
+  const { markdown, fields } = cleanEdsMarkdown(source);
+  assert.strictEqual(fields.title, 'The Real Page');
   assert.ok(!markdown.includes('A slot'));
 });
 
